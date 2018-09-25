@@ -1,0 +1,88 @@
+#!/usr/bin/env ruby
+# Copyright UNLICENSE https://github.com/johslarsen/binop/blob/master/bin/bstride
+
+require 'optparse'
+$opts = {}
+OptionParser.new do |o|
+  o.banner = "Usage: #{$0} [options] [FILE]..."
+  $opts[:fields] = []
+  o.on "-f", "--fields LIST", Array,
+    "Comma-separated list of, N, -N, N-M, N- byte ranges within record" do |fields|
+    $opts[:fields].concat fields
+  end
+  NonNegative = Struct.new :n
+  o.accept NonNegative do |str|
+    raise "Cannot be negative: #{str.inspect}" if (n = Integer(str)) < 0
+    n
+  end
+  $opts[:width] = 16
+  o.on "-w", "--width COUNT", NonNegative, "Record length. Default: #{$opts[:width]}" do |w|
+    $opts[:width] = w
+  end
+  $opts[:skip] = 0
+  o.on "-s", "--skip BYTES", NonNegative, "Skip the first BYTES" do |offset|
+    $opts[:skip] = offset
+  end
+  o.on "-c", "--count COUNT", NonNegative, "Only process COUNT records" do |count|
+    $opts[:count] = count
+  end
+end.permute!
+
+FIELDS = $opts[:fields].map do |f|
+  r = case f
+  when /^\d+$/
+    [f.to_i] * 2
+  when /^((0x)?\h*)-((0x)?\h*)$/
+    [$1.empty? ? 0 : Integer($1), $3.empty? ? nil : Integer($3)]
+  else
+    raise "Not a valid field descriptor #{f.inspect}"
+  end
+  raise "Field descriptor cannot have negative indexes #{f.inspect}" if r.any? {|i| i && i < 0}
+  raise "Field descriptor from must be <= to: #{f.inspect}" if r[1] && r[0] > r[1]
+  if r[0] >= $opts[:width] || r[1] && r[1] >= $opts[:width]
+    raise "Field descriptor from and to must be < width(#{$opts[:width]}) #{f.inspect}"
+  end
+  r
+end
+raise "A field descriptor must be specified" if FIELDS.empty?
+
+def bcut(file)
+  offset = nil
+  pipe_seeking_fallback = Proc.new do |pos|
+    offset ||= 0
+    raise "Cannot seek backward in pipe" if pos < offset
+    break unless file.read(pos - offset)
+    offset = pos
+  end
+
+  record = "\0"*$opts[:width]
+  ($opts[:count] ? 0...$opts[:count] : 0.step).each do |i|
+    break if file.closed? || file.eof?
+    FIELDS.each do |f|
+      from = $opts[:skip] + $opts[:width]*i + f.first
+      length = (f.last||($opts[:width]-1)) - f.first + 1
+      #$stderr.puts "#{f.inspect}: #{from}+#{length}"
+      begin
+        if offset
+          pipe_seeking_fallback.call from
+        else
+          file.seek(from)
+        end
+      rescue Errno::ESPIPE
+        pipe_seeking_fallback.call from
+      end
+      break unless file.read(length, record)
+      offset += length if offset
+      $stdout.write record[0...length]
+    end
+  end
+end
+
+bcut $stdin if ARGV.empty?
+ARGV.each do |fname|
+  if fname == '-'
+    bcut $stdin
+  else
+    File.open(fname) {|f| bcut f}
+  end
+end

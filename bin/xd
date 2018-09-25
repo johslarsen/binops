@@ -1,0 +1,2 @@
+#!/bin/bash -
+od -Ax -t x1 "$@"

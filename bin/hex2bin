@@ -1,0 +1,16 @@
+#!/usr/bin/env ruby
+# Copyright UNLICENSE https://github.com/johslarsen/binop/blob/master/bin/hex2bin
+
+ARGF.each do |l|
+  bytes = l.strip.split(/\s+/).reduce([]) do |bs, t|
+    bs.concat case t
+    when /^((0x)?\h+)-((0x)?\h+)$/i
+      (Integer($1, 16)..Integer($3, 16)).to_a
+    when /^((0x)?\h+)\*((0x)?\h+)$/i
+      [Integer($1, 16)]*Integer($3, 16)
+    else
+      [Integer(t, 16)]
+    end
+  end
+  $stdout.write(bytes.pack("C*"))
+end

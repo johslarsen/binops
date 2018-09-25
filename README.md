@@ -8,6 +8,7 @@ transformation operations on binary data files/pipes.
 | Name             | Description |
 | ---------------- | ----------- |
 | `bstride`        | Given `-wNBYTE` sized records, extract `-fCUT-LIKE-FIELDS`.
+| `hex2bin`        | Given hex data like `10 0-f f*a`, write it as binary data. |
 | `uniq_cols.gawk` | Linewise field counter (e.g. `1 2 2 2 1` -> `1 2*3 1`).
 | `xd`             | `od` wrapper for printing hex-based bytes.
 

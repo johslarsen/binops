@@ -1,7 +1,8 @@
 #!/usr/bin/env ruby
 # Copyright UNLICENSE https://github.com/johslarsen/binop/blob/master/bin/bstride
-
+require 'forwardable'
 require 'optparse'
+
 $opts = {}
 OptionParser.new do |o|
   o.banner = "Usage: #{$0} [options] [FILE]..."
@@ -46,43 +47,56 @@ FIELDS = $opts[:fields].map do |f|
 end
 raise "A field descriptor must be specified" if FIELDS.empty?
 
-def bcut(file)
-  offset = nil
-  pipe_seeking_fallback = Proc.new do |pos|
-    offset ||= 0
-    raise "Cannot seek backward in pipe" if pos < offset
-    break unless file.read(pos - offset)
-    offset = pos
+class SeekablePipe
+  extend Forwardable
+  def_delegators :@file, :closed?, :eof?
+
+  def initialize(file)
+    @file = file
+    @buffer = "" # grows as needed
+    @offset = nil
+  end
+  def read(nbyte)
+    @buffer = @file.read nbyte, @buffer
+    @offset += nbyte if @offset
+    @buffer
+  end
+  def seek(bof_offset)
+    @offset ? skip_to(bof_offset) : @file.seek(bof_offset)
+  rescue Errno::ESPIPE
+    @offset ||= 0
+    skip_to bof_offset
   end
 
-  record = "\0"*$opts[:width]
+  def self.stdin_or_each(fnames)
+    yield self.new($stdin) if ARGV.empty?
+    fnames.each do |fname|
+      if fname == '-'
+        yield self.new $stdin
+      else
+        File.open(fname) {|f| yield self.new(f)}
+      end
+    end
+  end
+
+  private def skip_to(bof_offset)
+    raise "Cannot seek backward in pipe" if bof_offset < @offset
+    @offset, before_seek = bof_offset, @offset
+    buffer_if_not_expanding = bof_offset < @buffer.length ? @buffer : nil
+    @file.read(bof_offset - before_seek, buffer_if_not_expanding)
+  end
+end
+
+SeekablePipe.stdin_or_each ARGV do |file|
   ($opts[:count] ? 0...$opts[:count] : 0.step).each do |i|
     break if file.closed? || file.eof?
     FIELDS.each do |f|
       from = $opts[:skip] + $opts[:width]*i + f.first
       length = (f.last||($opts[:width]-1)) - f.first + 1
       #$stderr.puts "#{f.inspect}: #{from}+#{length}"
-      begin
-        if offset
-          pipe_seeking_fallback.call from
-        else
-          file.seek(from)
-        end
-      rescue Errno::ESPIPE
-        pipe_seeking_fallback.call from
-      end
-      break unless file.read(length, record)
-      offset += length if offset
+      break unless file.seek(from)
+      break unless (record = file.read(length))
       $stdout.write record[0...length]
     end
-  end
-end
-
-bcut $stdin if ARGV.empty?
-ARGV.each do |fname|
-  if fname == '-'
-    bcut $stdin
-  else
-    File.open(fname) {|f| bcut f}
   end
 end

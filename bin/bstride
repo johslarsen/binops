@@ -3,19 +3,57 @@
 require 'forwardable'
 require 'optparse'
 
+def parse_range(r)
+  case r
+  when /^(-?(0[xX])?\h+)$/
+    from = Integer($~[1])
+    from..from
+  when /^(-?(0[xX])?\h+)?\.\.(-?(0[xX])?\h+)?$/
+    from = Integer($~[1] || 0)
+    to = Integer($~[3] || -1)
+    from..to
+  end
+end
+
+UnpackedRange = Struct.new :range, :directive, :format
+
 $opts = {}
 OptionParser.new do |o|
   o.banner = "Usage: #{$0} [options] [FILE]..."
-  $opts[:fields] = []
-  o.on "-f", "--fields LIST", Array,
-    "Comma-separated list of, N, -N, N-M, N- byte ranges within record" do |fields|
-    $opts[:fields].concat fields
-  end
   NonNegative = Struct.new :n
   o.accept NonNegative do |str|
     raise "Cannot be negative: #{str.inspect}" if (n = Integer(str)) < 0
     n
   end
+
+  $opts[:actions] = []
+  o.separator "Actions (executed in order specified)"
+  o.on "-f", '--fields N,"N..M",...', Array,
+      "Copy bytes at indexes / in ranges to output" do |fields|
+    $opts[:actions].concat(fields.map do |f|
+      parse_range(f) || raise("Not a range #{f.inspect}")
+    end)
+  end
+  o.on "-p", "--pack HEX[,HEX]...[:DIRECTIVE-=C*]",
+      "Write a packed HEX literal to the output",
+      "See `ri Array.pack` for how to specify DIRECTIVE" do |literals_directive|
+    l, d = literals_directive.split ':'
+    $opts[:actions] << l.split(',').map{|n|Integer(n, 16)}.pack(d||"C*")
+  end
+  o.on "-u", '--unpack N,"N..M",...[:DIRECTIVE-=C*][/FORMAT= %02x]',
+      "Write unpacked ranges of bytes to the output",
+      "See `ri String.unpack` for how to specify DIRECTIVE" do |fields_directive_format|
+    fields_directive, format = fields_directive_format.split("/")
+    fields, d = fields_directive.split ':'
+    $opts[:actions].concat(fields.split(',').map do |f|
+      UnpackedRange.new(parse_range(f) || raise("Not a range #{f.inspect}"), d||"C*", format||" %02x")
+    end)
+  end
+  o.on "-t", "--text UTF-8", "Write the UTF-8 literal to the output" do |s|
+    $opts[:actions] << s
+  end
+
+  o.separator "Record processing"
   $opts[:width] = 16
   o.on "-w", "--width COUNT", NonNegative, "Record length. Default: #{$opts[:width]}" do |w|
     $opts[:width] = w
@@ -29,24 +67,6 @@ OptionParser.new do |o|
   end
 end.permute!
 
-FIELDS = $opts[:fields].map do |f|
-  r = case f
-  when /^\d+$/
-    [f.to_i] * 2
-  when /^((0x)?\h*)-((0x)?\h*)$/
-    [$1.empty? ? 0 : Integer($1), $3.empty? ? nil : Integer($3)]
-  else
-    raise "Not a valid field descriptor #{f.inspect}"
-  end
-  raise "Field descriptor cannot have negative indexes #{f.inspect}" if r.any? {|i| i && i < 0}
-  raise "Field descriptor from must be <= to: #{f.inspect}" if r[1] && r[0] > r[1]
-  if r[0] >= $opts[:width] || r[1] && r[1] >= $opts[:width]
-    raise "Field descriptor from and to must be < width(#{$opts[:width]}) #{f.inspect}"
-  end
-  r
-end
-raise "A field descriptor must be specified" if FIELDS.empty?
-
 class SeekablePipe
   extend Forwardable
   def_delegators :@file, :closed?, :eof?
@@ -56,16 +76,27 @@ class SeekablePipe
     @buffer = "" # grows as needed
     @offset = nil
   end
+
   def read(nbyte)
     @buffer = @file.read nbyte, @buffer
     @offset += nbyte if @offset
     @buffer
   end
+
   def seek(bof_offset)
     @offset ? skip_to(bof_offset) : @file.seek(bof_offset)
   rescue Errno::ESPIPE
     @offset ||= 0
     skip_to bof_offset
+  end
+
+  def read_range(range, width, offset=0)
+    from = range.first < 0 ? width+range.first : range.first
+    length = (range.last < 0 ? width+range.last : range.last) - from + 1
+    return "" if from >= width || length < 0
+    length = width - from if from + length > width
+    return nil unless seek(offset + from)
+    read(length)
   end
 
   def self.stdin_or_each(fnames)
@@ -90,13 +121,18 @@ end
 SeekablePipe.stdin_or_each ARGV do |file|
   ($opts[:count] ? 0...$opts[:count] : 0.step).each do |i|
     break if file.closed? || file.eof?
-    FIELDS.each do |f|
-      from = $opts[:skip] + $opts[:width]*i + f.first
-      length = (f.last||($opts[:width]-1)) - f.first + 1
-      #$stderr.puts "#{f.inspect}: #{from}+#{length}"
-      break unless file.seek(from)
-      break unless (record = file.read(length))
-      $stdout.write record[0...length]
+    offset = $opts[:skip] + $opts[:width]*i
+    $opts[:actions].each do |action|
+      case action
+      when String
+        $stdout.write action
+      when Range
+        break unless (bytes = file.read_range action, $opts[:width], offset)
+        $stdout.write bytes
+      when UnpackedRange
+        break unless (bytes = file.read_range action.range, $opts[:width], offset)
+        $stdout.write bytes.unpack(action.directive).map{|s| action.format % [s]}.join
+      end
     end
   end
 end

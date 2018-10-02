@@ -7,8 +7,8 @@ transformation operations on binary data files/pipes.
 
 | Name             | Description |
 | ---------------- | ----------- |
-| `bstride`        | Given `-wNBYTE` sized records, extract `-fCUT-LIKE-FIELDS`.
-| `hex2bin`        | Given hex data like `10 0-f f*a`, write it as binary data. |
+| `bstride`        | Output date relative to fixed/variable length records.
+| `hex2bin`        | Given hex data like `10 0-f f*a`, write it as binary data.
 | `uniq_cols.gawk` | Linewise field counter (e.g. `1 2 2 2 1` -> `1 2*3 1`).
 | `xd`             | `od` wrapper for printing hex-based bytes.
 
@@ -16,13 +16,13 @@ transformation operations on binary data files/pipes.
 
 | Name          | Description |
 | ------------- | ----------- |
-| ~~`bgrep`~~   | Copy fixed size records matching pattern.
+| ~~`bgrep`~~   | Copy records matching pattern.
 | ~~`bscan`~~   | Scan for pattern and copy match/before/after/between.
-| ~~`bmap `~~   | or extend `bstride` with expression on fixed sized records.
-| ~~`baggre`~~  | or extend `bmap` with expression across fixed sized records.
-| ~~`buniq`~~   | `uniq` tool with mask `-c` and `-d` for fixed sized records.
+| ~~`bmap `~~   | or extend `bstride` with expression on data within records.
+| ~~`baggre`~~  | or extend `bmap` with expression across records.
+| ~~`buniq`~~   | `uniq` tool with mask `-c` and `-d` for records.
 | ~~`bsearch`~~ | Binary search sorted fixed size records.
-| ~~`bsort`~~   | Sort fixed size record by e.g. `-fCUT-LIKE-FIELDS`.
+| ~~`bsort`~~   | Sort records by e.g. `-fCUT-LIKE-FIELDS`.
 
 Note that names are only preliminary, order is kind of prioritized, and that
 strikethrough is just to emphasize that these do not exist yet.

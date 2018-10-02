@@ -106,6 +106,39 @@ EOF
     end
   end
 
+  INCREMENTAL_VLEN = [2,0x32,3,0x33,0,4,0x34,0,0,5,0x35,0,0,0].pack("C*")
+  def test_simple_vlen_record
+    assert_equal <<EOF.chomp, pipe("#{BIN}/bstride", "-c3", "-l0:C", "-u1", stdin: INCREMENTAL_VLEN)
+ 32 33 34
+EOF
+  end
+
+  def test_complicated_vlen_record
+    a_record = Proc.new do |payload|
+      "HEADER" + [payload.length].pack("S>") + payload + "FOOTER"
+    end
+    input = "SKIP THIS PART  "
+    nskip = input.length
+    input << a_record.call([0x1337].pack("S>"))
+    assert_equal "SKIP THIS PART  HEADER\x00\x02\x13\x37FOOTER", input
+    input << a_record.call(([0x13]*0x37).pack("C*"))
+    input << a_record.call(([0x12]*0x3456).pack("C*"))
+    input << a_record.call(([0x34]*0x0ff0).pack("C*"))
+    input << a_record.call(([0xff]*0xffff).pack("C*"))
+    input << a_record.call([0xdeadbeef].pack("L>"))
+    input << a_record.call(([0x13]*0xff).pack("C*"))[0..20] # partial record
+    output = pipe("#{BIN}/bstride", "-s#{nskip}", "-l6..7+14", "-u8..-7", "-t\n", stdin: input)
+    assert_equal <<EOF, pipe("#{BIN}/uniq_cols.gawk", stdin:output)
+13 37
+13*37
+12*3456
+34*ff0
+ff*ffff
+de ad be ef
+13*0d
+EOF
+  end
+
   DEVNULL = {out: '/dev/null', err: '/dev/null', in: '/dev/null'}
   def test_errors
     refute system "#{BIN}/bstride", '-w-1', DEVNULL # NonNegative, same for -c,-s

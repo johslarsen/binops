@@ -1,6 +1,5 @@
 #!/usr/bin/env ruby
 # Copyright UNLICENSE https://github.com/johslarsen/binop/blob/master/bin/bstride
-require 'forwardable'
 require 'optparse'
 
 def parse_range(r)
@@ -77,26 +76,20 @@ OptionParser.new do |o|
 end.permute!
 
 class SeekablePipe
-  extend Forwardable
-  def_delegators :@file, :closed?, :eof?
-
   def initialize(file)
     @file = file
-    @buffer = "" # grows as needed
-    @offset = nil
+    @buffer = String.new encoding: Encoding::ASCII_8BIT # grows as needed
+    @pipe_buffer = nil
   end
 
-  def read(nbyte)
-    @buffer = @file.read nbyte, @buffer
-    @offset += nbyte if @offset
-    @buffer
-  end
-
-  def seek(bof_offset)
-    @offset ? skip_to(bof_offset) : @file.seek(bof_offset)
+  def pread(maxlen, offset)
+    @pipe_buffer ? pipe_read(maxlen, offset) : @file.pread(maxlen, offset, @buffer)
+  rescue EOFError
+    return nil # act like read
   rescue Errno::ESPIPE
-    @offset ||= 0
-    skip_to bof_offset
+    @pipe_buffer = String.new encoding: Encoding::ASCII_8BIT
+    @pb_offset = 0
+    retry
   end
 
   def read_range(range, width, offset=0)
@@ -104,8 +97,7 @@ class SeekablePipe
     length = (range.last < 0 ? width+range.last : range.last) - from + 1
     return "" if length < 0 || width && from >= width
     length = width - from if width && from + length > width
-    return nil unless seek(offset + from)
-    read(length)
+    return pread length, offset + from
   end
 
   def self.stdin_or_each(fnames)
@@ -119,24 +111,37 @@ class SeekablePipe
     end
   end
 
-  private def skip_to(bof_offset)
-    raise "Cannot seek backward in pipe" if bof_offset < @offset
-    @offset, before_seek = bof_offset, @offset
-    buffer_if_not_expanding = bof_offset < @buffer.length ? @buffer : nil
-    @file.read(bof_offset - before_seek, buffer_if_not_expanding)
+  def clear_buffered
+    if @pipe_buffer
+      @pb_offset += @pipe_buffer.size
+      @pipe_buffer.clear
+    end
+  end
+
+  private def pipe_read(maxlen, offset)
+    raise "Cannot seek earlier than start of pipe buffer" if offset < @pb_offset
+    from = offset - @pb_offset
+    to = from + maxlen
+    nread = to - @pipe_buffer.size
+    if nread > 0
+      return @pipe_buffer[from..-1] unless @file.read nread, @buffer
+      @pipe_buffer << @buffer
+    end
+    @pipe_buffer[from...to]
   end
 end
 
 SeekablePipe.stdin_or_each ARGV do |file|
   offset = $opts[:skip]
   ($opts[:count] ? 0...$opts[:count] : 0.step).each do |i|
-    break if file.closed? || file.eof?
+    file.clear_buffered
     width = $opts[:width]
     if width.is_a? VlenRecord
       break unless (bytes = file.read_range(width.range, nil, offset))
       width = bytes.unpack(width.directive).first + width.extra_bytes
     end
-    $opts[:actions].each do |action|
+
+    break unless $opts[:actions].each do |action|
       case action
       when String
         $stdout.write action

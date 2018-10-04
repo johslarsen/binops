@@ -108,8 +108,10 @@ EOF
 
   INCREMENTAL_VLEN = [2,0x32,3,0x33,0,4,0x34,0,0,5,0x35,0,0,0].pack("C*")
   def test_simple_vlen_record
-    assert_equal <<EOF.chomp, pipe("#{BIN}/bstride", "-c3", "-l0:C", "-u1", stdin: INCREMENTAL_VLEN)
- 32 33 34
+    assert_equal <<EOF, pipe("#{BIN}/bstride", "-c3", "-l0:C", "-u..", "-t\n", stdin: INCREMENTAL_VLEN)
+ 02 32
+ 03 33 00
+ 04 34 00 00
 EOF
   end
 

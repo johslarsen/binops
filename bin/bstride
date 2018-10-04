@@ -1,6 +1,6 @@
 #!/usr/bin/env ruby
-# Copyright UNLICENSE https://github.com/johslarsen/binop/blob/master/bin/bstride
 require 'optparse'
+require_relative '../lib/seekable_pipe'
 
 def parse_range(r)
   case r
@@ -75,81 +75,28 @@ OptionParser.new do |o|
   end
 end.permute!
 
-class SeekablePipe
-  def initialize(file)
-    @file = file
-    @buffer = String.new encoding: Encoding::ASCII_8BIT # grows as needed
-    @pipe_buffer = nil
-  end
-
-  def pread(maxlen, offset)
-    @pipe_buffer ? pipe_read(maxlen, offset) : @file.pread(maxlen, offset, @buffer)
-  rescue EOFError
-    return nil # act like read
-  rescue Errno::ESPIPE
-    @pipe_buffer = String.new encoding: Encoding::ASCII_8BIT
-    @pb_offset = 0
-    retry
-  end
-
-  def read_range(range, width, offset=0)
-    from = range.first < 0 ? width+range.first : range.first
-    length = (range.last < 0 ? width+range.last : range.last) - from + 1
-    return "" if length < 0 || width && from >= width
-    length = width - from if width && from + length > width
-    return pread length, offset + from
-  end
-
-  def self.stdin_or_each(fnames)
-    yield self.new($stdin) if ARGV.empty?
-    fnames.each do |fname|
-      if fname == '-'
-        yield self.new $stdin
-      else
-        File.open(fname) {|f| yield self.new(f)}
-      end
-    end
-  end
-
-  def clear_buffered
-    if @pipe_buffer
-      @pb_offset += @pipe_buffer.size
-      @pipe_buffer.clear
-    end
-  end
-
-  private def pipe_read(maxlen, offset)
-    raise "Cannot seek earlier than start of pipe buffer" if offset < @pb_offset
-    from = offset - @pb_offset
-    to = from + maxlen
-    nread = to - @pipe_buffer.size
-    if nread > 0
-      return @pipe_buffer[from..-1] unless @file.read nread, @buffer
-      @pipe_buffer << @buffer
-    end
-    @pipe_buffer[from...to]
-  end
-end
-
 SeekablePipe.stdin_or_each ARGV do |file|
   offset = $opts[:skip]
+  record = RecordView.new file, offset
   ($opts[:count] ? 0...$opts[:count] : 0.step).each do |i|
     file.clear_buffered
     width = $opts[:width]
     if width.is_a? VlenRecord
-      break unless (bytes = file.read_range(width.range, nil, offset))
+      break unless (bytes = file.pread(width.range.size, offset + width.range.first))
       width = bytes.unpack(width.directive).first + width.extra_bytes
     end
+
+    record.replace(offset, width)
 
     break unless $opts[:actions].each do |action|
       case action
       when String
         $stdout.write action
       when Range
-        break unless (bytes = file.read_range action, width, offset)
+        break unless (bytes = record[action])
         $stdout.write bytes
       when UnpackedRange
-        break unless (bytes = file.read_range action.range, width, offset)
+        break unless (bytes = record[action.range])
         $stdout.write bytes.unpack(action.directive).map{|s| action.format % [s]}.join
       end
     end

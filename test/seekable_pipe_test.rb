@@ -55,6 +55,31 @@ class SeekablePipeTest < Minitest::Test
     assert_nil sp.pread(1, 6)
   end
 
+  def test_each_record_fixed_width_and_enumerator
+    Tempfile.create do |f|
+      f.write INPUT
+      records = SeekablePipe.new(f).each_record(2, initial_offset: 1).map do |r|
+        r[0..-1].dup
+      end
+      assert_equal ["OO", "BA", "R"], records
+    end
+  end
+
+  def test_each_record_variable_length
+    Tempfile.create do |f|
+      f.write([0x42, 1, 0].pack("C*"))
+      f.write([0x42, 2, 0, 0].pack("C*"))
+      f.write([0x42, 3, 0, 0, 0].pack("C*"))
+
+      records = []
+      SeekablePipe.new(f).each_record(SeekablePipe::Vlen.new(1..1, "C", 2)) do |r|
+        records << r[0..-1].dup.unpack("H*").first
+      end
+
+      assert_equal ["420100", "42020000", "4203000000"], records
+    end
+  end
+
   def test_stdin_or_each_empty
     files = []
     SeekablePipe.stdin_or_each([]) {|sp| files << extract_file(sp)}

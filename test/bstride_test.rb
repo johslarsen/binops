@@ -5,10 +5,10 @@ require_relative 'common'
 
 class BstrideTest < Minitest::Test
 
-  def test_width_and_count
+  def test_width_and_that_epipe_is_handled_correctly
     IotaMatrix.new(8, 16).as_tempfile do |f|
       # NOTE: the diagonals (i.e. misaligned by one)
-      assert_equal <<EOF, `#{BIN}/bstride -f..3 -w15 -c4 #{f.path} | #{BIN}/xd -Anone -w4`
+      assert_equal <<EOF, `#{BIN}/bstride -f..3 -w15 #{f.path} | head -c 16 | #{BIN}/xd -Anone -w4`
  00 01 02 03
  0f 10 11 12
  1e 1f 20 21
@@ -108,10 +108,11 @@ EOF
 
   INCREMENTAL_VLEN = [2,0x32,3,0x33,0,4,0x34,0,0,5,0x35,0,0,0].pack("C*")
   def test_simple_vlen_record
-    assert_equal <<EOF, pipe("#{BIN}/bstride", "-c3", "-l0:C", "-u..", "-t\n", stdin: INCREMENTAL_VLEN)
+    assert_equal <<EOF, pipe("#{BIN}/bstride", "-l0:C", "-u..", "-t\n", stdin: INCREMENTAL_VLEN)
  02 32
  03 33 00
  04 34 00 00
+ 05 35 00 00 00
 EOF
   end
 
@@ -143,7 +144,7 @@ EOF
 
   DEVNULL = {out: '/dev/null', err: '/dev/null', in: '/dev/null'}
   def test_errors
-    refute system "#{BIN}/bstride", '-w-1', DEVNULL # NonNegative, same for -c,-s
+    refute system "#{BIN}/bstride", '-w-1', DEVNULL # NonNegative, same for -s
     refute system "#{BIN}/bstride", '-ff', DEVNULL # Not a number
     refute system "#{BIN}/bstride", '-f0-3', DEVNULL # Not a range
     refute system "#{BIN}/bstride", '-f0..1..3', DEVNULL # Not a range

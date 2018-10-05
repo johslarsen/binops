@@ -1,5 +1,6 @@
 #!/usr/bin/env ruby
 require_relative 'record_view'
+require_relative 'binops'
 
 # Public: A file/pipe wrapper that supports a unified pread operation.
 class SeekablePipe
@@ -7,6 +8,7 @@ class SeekablePipe
     @file = file
     @buffer = String.new encoding: Encoding::ASCII_8BIT # grows as needed
     @pipe_buffer = nil
+    @eof = false
   end
 
   # Public: Read data starting at the given SEEK_SET offset. Mimics IO#pread,
@@ -22,13 +24,20 @@ class SeekablePipe
   # there is no more data available, or nil if the offset is beyond EOF.
   def pread(maxlen, offset, buffer=nil)
     buffer ||= @buffer
-    @pipe_buffer ? pipe_read(maxlen, offset, buffer) : @file.pread(maxlen, offset, buffer)
+    buffer = @pipe_buffer ? pipe_read(maxlen, offset, buffer) : @file.pread(maxlen, offset, buffer)
   rescue EOFError
-    return nil # act like read
+    return (buffer = nil) # act like read
   rescue Errno::ESPIPE
     @pipe_buffer = String.new encoding: Encoding::ASCII_8BIT
     @pb_offset = 0
     retry
+  ensure
+    @eof = true if buffer.nil? || buffer.size < maxlen
+  end
+
+  # Returns true if io have been pread beyond EOF.
+  def eof?
+    @eof
   end
 
   # Public: Process wrapped files/$stdin.
@@ -60,6 +69,79 @@ class SeekablePipe
     end
   end
 
+  Vlen = Struct.new :range, :directive, :nbytes_extra
+
+  # Public: Process the io as consecutive fixed/varible sized records.
+  #
+  # width - Integer for fixed / Vlen for variable sized records.
+  # initial_offset - Integer number of bytes to skip before first record.
+  #
+  # Returns self or Enumerator if no block is given.
+  # Yields a reused RecordView for each record.
+  def each_record(width, initial_offset:0)
+    unless block_given?
+      return to_enum __method__, width, initial_offset: initial_offset
+    end
+
+    offset = initial_offset
+    record = RecordView.new self, 0
+    loop do
+      clear_buffered
+
+      length = width
+      if length.is_a? Vlen
+        break self unless (bytes = pread(width.range.size, offset + width.range.first))
+        length = bytes.unpack(width.directive).first + (width.nbytes_extra || 0)
+      end
+
+      record.replace offset, length
+      yield record
+
+      break self if eof?
+      offset += length
+    end
+  end
+
+  # Public: Add options that configure a each_record call.
+  #
+  # option_parser - The OptionParser to add options to.
+  #
+  # Returns Array meant as SeekablePipe#each_record arguments.
+  def self.each_record_options(option_parser)
+    args = [16, {initial_offset: 0}]
+    o = option_parser
+
+    non_negative = Struct.new :n
+    o.accept non_negative do |str|
+      raise "Cannot be negative: #{str.inspect}" if (n = Integer(str)) < 0
+      n
+    end
+    o.accept Filter do |range_op_n|
+      range_dir_mask,op,n = range_op_n.partition(/\s*([<>]=?|[!=]=)\s*/)
+      range_dir,m = range_dir_mask.split("&")
+      r,d = range_dir.split(":")
+      Filter.new Binops.parse_range(r), op.strip.to_sym, Integer(n), m && Integer(m, 16), d || "C"
+    end
+
+    o.separator "Record processing"
+    o.on "-w", "--width BYTES", non_negative, "Fixed sized record length. Default: #{args[0]}" do |w|
+      args[0] = w
+    end
+    o.on("-l", "--length N[..M][:DIRECTIVE-=S>][+BYTES]",
+         "Variable length record unpacked from N..Mth bytes + BYTES.",
+         "Write unpacked ranges of bytes to the output") do |range_directive_bytes|
+      range_directive, bytes = range_directive_bytes.split '+'
+      rstr, directive = range_directive.split ':'
+      range = Binops.parse_postive_increasing_range rstr
+      args[0] = Vlen.new(range, directive || "S>", Integer(bytes || 0))
+    end
+
+    o.on "-s", "--skip BYTES", non_negative, "Skip the first BYTES" do |offset|
+      args[1][:initial_offset] = offset
+    end
+
+    args
+  end
   private
 
   def pipe_read(maxlen, offset, buffer)

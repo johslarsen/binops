@@ -2,37 +2,18 @@
 require 'optparse'
 require_relative '../lib/seekable_pipe'
 
-def parse_range(r)
-  case r
-  when /^(-?(0[xX])?\h+)$/
-    from = Integer($~[1])
-    from..from
-  when /^(-?(0[xX])?\h+)?\.\.(-?(0[xX])?\h+)?$/
-    from = Integer($~[1] || 0)
-    to = Integer($~[3] || -1)
-    from..to
-  else
-    raise "Not a range #{r.inspect}"
-  end
-end
+Signal.trap("SIGPIPE", "SYSTEM_DEFAULT")
 
 UnpackedRange = Struct.new :range, :directive, :format
-VlenRecord = Struct.new :range, :directive, :extra_bytes
 
 $opts = {}
 OptionParser.new do |o|
   o.banner = "Usage: #{$0} [options] [FILE]..."
-  NonNegative = Struct.new :n
-  o.accept NonNegative do |str|
-    raise "Cannot be negative: #{str.inspect}" if (n = Integer(str)) < 0
-    n
-  end
-
   $opts[:actions] = []
   o.separator "Actions (executed in order specified)"
   o.on "-f", '--fields N,"N..M",...', Array,
       "Copy bytes at indexes / in ranges to output" do |fields|
-    $opts[:actions].concat(fields.map{|f|parse_range(f)})
+    $opts[:actions].concat(fields.map{|f|Binops.parse_range(f)})
   end
   o.on "-p", "--pack HEX[,HEX]...[:DIRECTIVE-=C*]",
       "Write a packed HEX literal to the output",
@@ -46,60 +27,29 @@ OptionParser.new do |o|
     fields_directive, format = fields_directive_format.split("/")
     fields, d = fields_directive.split ':'
     $opts[:actions].concat(fields.split(',').map do |f|
-      UnpackedRange.new(parse_range(f), d||"C*", format||" %02x")
+      UnpackedRange.new(Binops.parse_range(f), d||"C*", format||" %02x")
     end)
   end
   o.on "-t", "--text UTF-8", "Write the UTF-8 literal to the output" do |s|
     $opts[:actions] << s
   end
 
-  o.separator "Record processing"
-  $opts[:width] = 16
-  o.on "-w", "--width BYTES", NonNegative, "Fixed sized record length. Default: #{$opts[:width]}" do |w|
-    $opts[:width] = w
-  end
-  o.on "-l", "--length N..M[:DIRECTIVE-=S>][+BYTES]",
-      "Varibale length record unpacked from N..Mth bytes + BYTES.",
-      "Write unpacked ranges of bytes to the output" do |range_directive_bytes|
-    range_directive, bytes = range_directive_bytes.split '+'
-    range, directive = range_directive.split ':'
-    $opts[:width] = VlenRecord.new(parse_range(range), directive || "S>", Integer(bytes || 0))
-  end
-
-  $opts[:skip] = 0
-  o.on "-s", "--skip BYTES", NonNegative, "Skip the first BYTES" do |offset|
-    $opts[:skip] = offset
-  end
-  o.on "-c", "--count COUNT", NonNegative, "Only process COUNT records" do |count|
-    $opts[:count] = count
-  end
+  $opts[:each_record] = SeekablePipe.each_record_options o
 end.permute!
 
 SeekablePipe.stdin_or_each ARGV do |file|
-  offset = $opts[:skip]
-  record = RecordView.new file, offset
-  ($opts[:count] ? 0...$opts[:count] : 0.step).each do |i|
-    file.clear_buffered
-    width = $opts[:width]
-    if width.is_a? VlenRecord
-      break unless (bytes = file.pread(width.range.size, offset + width.range.first))
-      width = bytes.unpack(width.directive).first + width.extra_bytes
-    end
-
-    record.replace(offset, width)
-
-    break unless $opts[:actions].each do |action|
+  file.each_record(*$opts[:each_record]) do |record|
+    $opts[:actions].each do |action|
       case action
       when String
         $stdout.write action
       when Range
-        break unless (bytes = record[action])
+        break nil unless (bytes = record[action])
         $stdout.write bytes
       when UnpackedRange
-        break unless (bytes = record[action.range])
+        break nil unless (bytes = record[action.range])
         $stdout.write bytes.unpack(action.directive).map{|s| action.format % [s]}.join
       end
     end
-    offset += width
   end
 end

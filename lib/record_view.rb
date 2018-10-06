@@ -39,4 +39,69 @@ class RecordView
     length = @length - from if @length && from + length > @length
     return @io.pread length, @offset + from, buffer
   end
+
+  # Public: A Range associated with how it should be output.
+  class UnpackedRange < Struct.new(:range, :directive, :format)
+    def initialize(range, directive="C*", format=" %02x")
+      super
+    end
+  end
+
+  # Public: Write a set of operations to the given io.
+  #
+  # io - IO to write to.
+  # *operations - String/Range/UnpackedRange. Will be written in order.
+  #
+  # Returns io.write or nil if operation needs data beyond EOF.
+  def scripted_write(io, operations)
+    operations.each do |op|
+      case op
+      when String
+        io.write op
+      when Range
+        break unless (bytes = self[op])
+        io.write bytes
+      when UnpackedRange
+        break unless (bytes = self[op.range])
+        io.write bytes.unpack(op.directive).map{|s| op.format % [s]}.join
+      end
+    end
+  end
+
+  # Public: Add options that configure a scripted_write call.
+  #
+  # option_parser - The OptionParser to add options to.
+  #
+  # Returns Array meant as RecordView#scripted_write arguments.
+  def self.scripted_write_options(option_parser)
+    args = [$stdout, []]
+    o = option_parser
+
+    o.separator "Output operations (executed in order specified)"
+    o.on "-f", '--fields N,"N..M",...', Array,
+        "Copy bytes at indexes / in ranges to output" do |fields|
+      args[1].concat(fields.map{|f|Binops.parse_range(f)})
+    end
+    o.on "-u", '--unpack N,"N..M",...[:DIRECTIVE-=C*][?FORMAT= %02x]',
+        "Write unpacked ranges of bytes to the output",
+        "See `ri String.unpack` for how to specify DIRECTIVE" do |fields_directive_format|
+      fields_directive, format = fields_directive_format.split("?")
+      fields, d = fields_directive.split ':'
+      args[1].concat(fields.split(',').map do |f|
+        UnpackedRange.new(Binops.parse_range(f), d||"C*", format||" %02x")
+      end)
+    end
+
+    o.on "-t", "--text UTF-8", "Write the UTF-8 literal to the output" do |s|
+      args[1] << s
+    end
+    o.on "-p", "--pack HEX[,HEX]...[:DIRECTIVE-=C*]",
+        "Write a packed HEX literal to the output",
+        "See `ri Array.pack` for how to specify DIRECTIVE" do |literals_directive|
+      l, d = literals_directive.split ':'
+      args[1] << l.split(',').map{|n|Integer(n, 16)}.pack(d||"C*")
+    end
+
+    args
+  end
 end

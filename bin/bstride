@@ -4,52 +4,17 @@ require_relative '../lib/seekable_pipe'
 
 Signal.trap("SIGPIPE", "SYSTEM_DEFAULT")
 
-UnpackedRange = Struct.new :range, :directive, :format
-
 $opts = {}
 OptionParser.new do |o|
   o.banner = "Usage: #{$0} [options] [FILE]..."
-  $opts[:actions] = []
-  o.separator "Actions (executed in order specified)"
-  o.on "-f", '--fields N,"N..M",...', Array,
-      "Copy bytes at indexes / in ranges to output" do |fields|
-    $opts[:actions].concat(fields.map{|f|Binops.parse_range(f)})
-  end
-  o.on "-p", "--pack HEX[,HEX]...[:DIRECTIVE-=C*]",
-      "Write a packed HEX literal to the output",
-      "See `ri Array.pack` for how to specify DIRECTIVE" do |literals_directive|
-    l, d = literals_directive.split ':'
-    $opts[:actions] << l.split(',').map{|n|Integer(n, 16)}.pack(d||"C*")
-  end
-  o.on "-u", '--unpack N,"N..M",...[:DIRECTIVE-=C*][/FORMAT= %02x]',
-      "Write unpacked ranges of bytes to the output",
-      "See `ri String.unpack` for how to specify DIRECTIVE" do |fields_directive_format|
-    fields_directive, format = fields_directive_format.split("/")
-    fields, d = fields_directive.split ':'
-    $opts[:actions].concat(fields.split(',').map do |f|
-      UnpackedRange.new(Binops.parse_range(f), d||"C*", format||" %02x")
-    end)
-  end
-  o.on "-t", "--text UTF-8", "Write the UTF-8 literal to the output" do |s|
-    $opts[:actions] << s
-  end
-
-  $opts[:each_record] = SeekablePipe.each_record_options o
+  $opts = {
+    scripted_write: RecordView.scripted_write_options(o),
+    each_record: SeekablePipe.each_record_options(o),
+  }
 end.permute!
 
 SeekablePipe.stdin_or_each ARGV do |file|
   file.each_record(*$opts[:each_record]) do |record|
-    $opts[:actions].each do |action|
-      case action
-      when String
-        $stdout.write action
-      when Range
-        break nil unless (bytes = record[action])
-        $stdout.write bytes
-      when UnpackedRange
-        break nil unless (bytes = record[action.range])
-        $stdout.write bytes.unpack(action.directive).map{|s| action.format % [s]}.join
-      end
-    end
+    record.scripted_write(*$opts[:scripted_write])
   end
 end

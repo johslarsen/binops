@@ -31,7 +31,7 @@ EOF
 
   def test_unpack
     IotaMatrix.new(4, 16).as_tempfile do |f|
-      assert_equal <<EOF.chomp, `#{BIN}/bstride -tHex: -u2..4,0xe "-u8..11:s>*/ 0x%04x" -t$'\\n' #{f.path}`
+      assert_equal <<EOF.chomp, `#{BIN}/bstride -tHex: -u2..4,0xe "-u8..11:s>*? 0x%04x" -t$'\\n' #{f.path}`
 Hex: 02 03 04 0e 0x0809 0x0a0b
 Hex: 12 13 14 1e 0x1819 0x1a1b
 Hex: 22 23 24 2e 0x2829 0x2a2b

@@ -41,6 +41,18 @@ class RecordViewTest < Minitest::Test
     end
   end
 
+  UR = RecordView::UnpackedRange
+  def test_scripted_write
+    with_foobar_tempfile do |f|
+      r = RecordView.new f, 1, 4
+      io = StringIO.new
+
+      r.scripted_write io, ["foo ", 1..2, UR.new(2..-1), UR.new(2..-1, "S<"),
+                            UR.new(0..-1, "S<*", ",%x")]
+      assert_equal "foo OB 42 41 4142,4f4f,4142", io.string
+    end
+  end
+
   private
 
   def with_foobar_tempfile

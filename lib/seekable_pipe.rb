@@ -102,13 +102,51 @@ class SeekablePipe
     end
   end
 
+  class Filter < Struct.new :range, :comparator, :other, :mask, :directive
+    def initialize range, comparator, other, mask=nil, directive="C"
+      super
+    end
+  end
+
+  # Public: SeekablePipe#each_record, but with some filtering functionality.
+  #
+  # width - See SeekablePipe#each_record.
+  # initial_offset - See SeekablePipe#initial_offset
+  # filters - Array of filters TODO
+  # count - Break after yielding Integer count number of records.
+  #
+  # Returns self or Enumerator if no block is given.
+  # Yields a reused RecordView for each record.
+  def each_record_filtered(width, initial_offset:0, filters: [], count:nil)
+    unless block_given?
+      return to_enum(__method__, width, initial_offset: initial_offset,
+                     filters: filters, count: count)
+    end
+
+    each_record(width, initial_offset: initial_offset) do |record|
+      unless filters.empty?
+        next unless filters.any? do |f|
+          break false unless (bytes = record[f.range])
+          n = bytes.unpack(f.directive).first
+          n &= f.mask if f.mask
+          n.send f.comparator, f.other
+        end
+      end
+      if count
+        break if count <= 0
+        count -= 1
+      end
+      yield record
+    end
+  end
+
   # Public: Add options that configure a each_record call.
   #
   # option_parser - The OptionParser to add options to.
   #
   # Returns Array meant as SeekablePipe#each_record arguments.
-  def self.each_record_options(option_parser)
-    args = [16, {initial_offset: 0}]
+  def self.each_record_filtered_options(option_parser)
+    args = [16, {initial_offset: 0, count: nil, filters: []}]
     o = option_parser
 
     non_negative = Struct.new :n
@@ -138,6 +176,16 @@ class SeekablePipe
 
     o.on "-s", "--skip BYTES", non_negative, "Skip the first BYTES" do |offset|
       args[1][:initial_offset] = offset
+    end
+
+    o.separator "Record filtering"
+    o.on("-g", '--grep "N[..M][:D-=C][&HEX] OP INT"', Filter,
+         'Search for records with unpacked N..Mth bytes (optionally HEX masked)',
+         'matching (e.g. ==) INT. If multiple "-g", match any one of them.') do |filter|
+      args[1][:filters] << filter
+    end
+    o.on "-c", "--count COUNT", non_negative, "Only output COUNT records from each file" do |count|
+      args[1][:count] = count
     end
 
     args

@@ -80,6 +80,18 @@ class SeekablePipeTest < Minitest::Test
     end
   end
 
+  def test_each_record_filtered
+    IotaMatrix.new(16,16).as_tempfile do |f|
+      sp = SeekablePipe.new(f)
+      filters = [SeekablePipe::Filter.new(0..0, :==, 0x10, 0x10),
+                 SeekablePipe::Filter.new(3..4, :>=, 0x8483, nil, "S<")]
+      records = sp.each_record_filtered(16, filters:filters, count:7).map do |r|
+        r[0..0].ord
+      end
+      assert_equal [0x10, 0x30, 0x50, 0x70, 0x80, 0x90, 0xa0], records
+    end
+  end
+
   def test_stdin_or_each_empty
     files = []
     SeekablePipe.stdin_or_each([]) {|sp| files << extract_file(sp)}

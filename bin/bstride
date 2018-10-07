@@ -9,12 +9,12 @@ OptionParser.new do |o|
   o.banner = "Usage: #{$0} [options] [FILE]..."
   $opts = {
     scripted_write: RecordView.scripted_write_options(o),
-    each_record: SeekablePipe.each_record_options(o),
+    each_record_filtered: SeekablePipe.each_record_filtered_options(o),
   }
 end.permute!
 
 SeekablePipe.stdin_or_each ARGV do |file|
-  file.each_record(*$opts[:each_record]) do |record|
+  file.each_record_filtered(*$opts[:each_record_filtered]) do |record|
     record.scripted_write(*$opts[:scripted_write])
   end
 end

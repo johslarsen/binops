@@ -95,11 +95,10 @@ class RecordView
     o.on "-t", "--text UTF-8", "Write the UTF-8 literal to the output" do |s|
       args[1] << s
     end
-    o.on "-p", "--pack HEX[,HEX]...[:DIRECTIVE-=C*]",
-        "Write a packed HEX literal to the output",
-        "See `ri Array.pack` for how to specify DIRECTIVE" do |literals_directive|
-      l, d = literals_directive.split ':'
-      args[1] << l.split(',').map{|n|Integer(n, 16)}.pack(d||"C*")
+    o.on "-p", "--pack #{Binops::GENERATE_SYNTAX}",
+        "Append a generated binary pattern to the output",
+        "See `ri Array.pack` for how to specify DIRECTIVE" do |pattern|
+      args[1] << Binops.generate(pattern)
     end
 
     args

@@ -20,7 +20,7 @@ EOF
   def test_fields_utf8_and_literal
     IotaMatrix.new(4, 16).as_tempfile do |f|
       # NOTE: the diagonals (i.e. misaligned by one)
-      assert_equal <<EOF, `#{BIN}/bstride -f..1,0xa..11 -p"1234:l>" -p"5678:s_" -tæøå -f-2.. -p13,37 #{f.path} | #{BIN}/xd -Anone -w20`
+      assert_equal <<EOF, `#{BIN}/bstride -f..1,0xa..11 -p"0x1234:l>" -p"0x5678:s_" -tæøå -f-2.. -p0x13,0x37 #{f.path} | #{BIN}/xd -Anone -w20`
  00 01 0a 0b 00 00 12 34 78 56 c3 a6 c3 b8 c3 a5 0e 0f 13 37
  10 11 1a 1b 00 00 12 34 78 56 c3 a6 c3 b8 c3 a5 1e 1f 13 37
  20 21 2a 2b 00 00 12 34 78 56 c3 a6 c3 b8 c3 a5 2e 2f 13 37
@@ -67,6 +67,15 @@ EOF
 EOF
       end
     end
+  end
+
+  def test_no_input
+    assert_equal <<EOF, `#{BIN}/bstride -p 0..7,0xf7..0xf0 -p 0,0xff^8 -c2 | #{BIN}/xd -Anone`
+ 00 01 02 03 04 05 06 07 f7 f6 f5 f4 f3 f2 f1 f0
+ 00 ff 00 ff 00 ff 00 ff 00 ff 00 ff 00 ff 00 ff
+ 00 01 02 03 04 05 06 07 f7 f6 f5 f4 f3 f2 f1 f0
+ 00 ff 00 ff 00 ff 00 ff 00 ff 00 ff 00 ff 00 ff
+EOF
   end
 
   def test_stdin
@@ -146,6 +155,6 @@ EOF
     refute system "#{BIN}/bstride", '-ff', DEVNULL # Not a number
     refute system "#{BIN}/bstride", '-f0-3', DEVNULL # Not a range
     refute system "#{BIN}/bstride", '-f0..1..3', DEVNULL # Not a range
-    refute system "#{BIN}/bstride", '-pfoo', DEVNULL # Not a hex literal
+    refute system "#{BIN}/bstride", '-pfoo', DEVNULL # Not a Binops.generate literal
   end
 end

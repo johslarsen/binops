@@ -31,4 +31,24 @@ module Binops
     raise ArgumentError, "#{string.inspect} is not positive" if range.min < 0
     range
   end
+
+  GENERATE_SYNTAX = 'N,"N..M",...,[:DIRECTIVE-=C*][^NREPEAT-=1]'
+  # Public: Eagerly generate packed binary patterns specified using the
+  # GENERATE_SYNTAX, e.g.:
+  #
+  #   * 1            -> [1].pack("C*")
+  #   * 9..0xB:S*^2  -> ([9,0xA,0xB]*2).pack("S*")
+  #   * 1,6..4,0xf^3 -> ([1,6,5,4,0xf]*3).pack("C*")
+  #
+  # Returns packed String with the generated pattern
+  def self.generate(string)
+      literal_directive, nrepeat = string.split '^'
+      nrepeat = (nrepeat || 1).to_i
+      l, d = literal_directive.split ':'
+      unpacked = l.split(",").map do |s|
+        r = parse_range(s)
+        (r.last < r.first ? r.first.downto(r.last) : r).to_a
+      end
+      ((unpacked.flatten)*nrepeat).pack(d||"C*")
+  end
 end

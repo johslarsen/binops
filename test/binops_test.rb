@@ -31,4 +31,10 @@ class BinopsTest < Minitest::Test
     assert_raises(ArgumentError) {Binops.parse_postive_increasing_range("1...1")}
   end
 
+  def test_generate
+    assert_equal [1].pack("C*"), Binops.generate("1")
+    assert_equal ([9,0xa,0xB]*2).pack("S*"), Binops.generate("9..0xB:S*^2")
+    assert_equal ([1,6,5,4,0xf]*3).pack("C*"), Binops.generate("1,6..4,0xf^3")
+  end
+
 end

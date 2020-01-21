@@ -101,6 +101,6 @@ class RecordView
       args[1] << Binops.generate(pattern)
     end
 
-    args
+    [args, {}]
   end
 end

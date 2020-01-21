@@ -146,7 +146,8 @@ class SeekablePipe
   #
   # Returns Array meant as SeekablePipe#each_record arguments.
   def self.each_record_filtered_options(option_parser)
-    args = [16, {initial_offset: 0, count: nil, filters: []}]
+    args = [16]
+    kwargs = {initial_offset: 0, count: nil, filters: []}
     o = option_parser
 
     non_negative = Struct.new :n
@@ -175,20 +176,20 @@ class SeekablePipe
     end
 
     o.on "-s", "--skip BYTES", non_negative, "Skip the first BYTES" do |offset|
-      args[1][:initial_offset] = offset
+      kwargs[:initial_offset] = offset
     end
 
     o.separator "Record filtering"
     o.on("-g", '--grep "N[..M][:D-=C][&HEX] OP INT"', Filter,
          'Search for records with unpacked N..Mth bytes (optionally HEX masked)',
          'matching (e.g. ==) INT. If multiple "-g", match any one of them.') do |filter|
-      args[1][:filters] << filter
+      kwargs[:filters] << filter
     end
     o.on "-c", "--count COUNT", non_negative, "Only output COUNT records from each file" do |count|
-      args[1][:count] = count
+      kwargs[:count] = count
     end
 
-    args
+    [args, kwargs]
   end
   private
 

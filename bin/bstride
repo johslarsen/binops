@@ -14,7 +14,7 @@ OptionParser.new do |o|
 end.permute!
 
 SeekablePipe.stdin_or_each ARGV do |file|
-  file.each_record_filtered(*$opts[:each_record_filtered]) do |record|
-    record.scripted_write(*$opts[:scripted_write])
+  file.each_record_filtered(*$opts[:each_record_filtered][0], **$opts[:each_record_filtered][1]) do |record|
+    record.scripted_write(*$opts[:scripted_write][0], **$opts[:scripted_write][1])
   end
 end

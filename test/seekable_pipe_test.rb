@@ -1,5 +1,5 @@
 #!/usr/bin/env ruby
-require 'minitest/autorun'
+require_relative 'test_helper'
 require 'seekable_pipe'
 require 'socket'
 require_relative 'common'

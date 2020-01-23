@@ -1,6 +1,6 @@
 #!/usr/bin/env ruby
 # encoding "UTF-8"
-require 'minitest/autorun'
+require_relative 'test_helper'
 require_relative 'common'
 
 class BstrideTest < Minitest::Test

@@ -1,5 +1,5 @@
 #!/usr/bin/env ruby
-require 'minitest/autorun'
+require_relative 'test_helper'
 require 'record_view'
 require_relative 'common'
 

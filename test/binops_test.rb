@@ -1,6 +1,6 @@
 #!/usr/bin/env ruby
+require_relative 'test_helper'
 require 'binops'
-require 'minitest/autorun'
 
 class BinopsTest < Minitest::Test
   def test_parse_range

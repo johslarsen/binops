@@ -36,7 +36,7 @@ class RecordViewTest < Minitest::Test
       r = RecordView.new f, 2, 2
       assert_equal "OB", r[0..-1]
 
-      r.replace(0,3)
+      r.replace(0, 3)
       assert_equal "FOO", r[0..-1]
     end
   end

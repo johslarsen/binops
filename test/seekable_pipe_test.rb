@@ -5,7 +5,6 @@ require 'socket'
 require_relative 'common'
 
 class SeekablePipeTest < Minitest::Test
-
   INPUT = "FOOBAR"
 
   def test_as_file_wrapper
@@ -45,13 +44,13 @@ class SeekablePipeTest < Minitest::Test
     assert_equal "FOO", sp.pread(3, 0)
     assert_equal "B", sp.pread(1, 3)
     sp.clear_buffered
-    assert_raises(RuntimeError) {sp.pread(1,3)}
+    assert_raises(RuntimeError) { sp.pread(1, 3) }
     assert_equal "AR", sp.pread(2, 4)
     assert_equal "AR", sp.pread(6, 4)
     assert_nil sp.pread(1, 6)
 
     sp.clear_buffered
-    assert_raises(RuntimeError) {sp.pread(1,5)}
+    assert_raises(RuntimeError) { sp.pread(1, 5) }
     assert_nil sp.pread(1, 6)
   end
 
@@ -73,7 +72,7 @@ class SeekablePipeTest < Minitest::Test
 
       records = []
       SeekablePipe.new(f).each_record(SeekablePipe::Vlen.new(1..1, "C", 2)) do |r|
-        records << r[0..-1].dup.unpack("H*").first
+        records << r[0..-1].dup.unpack1("H*")
       end
 
       assert_equal ["420100", "42020000", "4203000000"], records
@@ -81,11 +80,11 @@ class SeekablePipeTest < Minitest::Test
   end
 
   def test_each_record_filtered
-    IotaMatrix.new(16,16).as_tempfile do |f|
+    IotaMatrix.new(16, 16).as_tempfile do |f|
       sp = SeekablePipe.new(f)
       filters = [SeekablePipe::Filter.new(0..0, :==, 0x10, 0x10),
                  SeekablePipe::Filter.new(3..4, :>=, 0x8483, nil, "S<")]
-      records = sp.each_record_filtered(16, filters:filters, count:7).map do |r|
+      records = sp.each_record_filtered(16, filters: filters, count: 7).map do |r|
         r[0..0].ord
       end
       assert_equal [0x10, 0x30, 0x50, 0x70, 0x80, 0x90, 0xa0], records
@@ -94,7 +93,7 @@ class SeekablePipeTest < Minitest::Test
 
   def test_stdin_or_each_empty
     files = []
-    SeekablePipe.stdin_or_each([]) {|sp| files << extract_file(sp)}
+    SeekablePipe.stdin_or_each([]) { |sp| files << extract_file(sp) }
     assert_equal [$stdin], files
   end
 
@@ -119,5 +118,4 @@ class SeekablePipeTest < Minitest::Test
     end
     seekable_pipe.file
   end
-
 end

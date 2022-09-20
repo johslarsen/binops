@@ -10,7 +10,7 @@ BIN = File.join File.dirname(__FILE__), '..', 'bin/'
 #
 # Returns String with stdout and stderr from the command.
 def pipe(*cmd, stdin: nil)
-  IO.popen(cmd, "r+", err: [:child, :out]) do |io|
+  IO.popen(cmd, "r+", err: %i[child out]) do |io|
     io.write stdin if stdin
     io.close_write
     io.read
@@ -19,14 +19,15 @@ end
 
 class IotaMatrix
   attr_reader :rows
+
   def initialize(nrow, ncol)
     @rows = (0...nrow).map do |row|
-      (0...ncol).map{|col| (row<<4) + col}
+      (0...ncol).map { |col| (row << 4) + col }
     end
   end
 
   def to_ascii
-    @rows.map{|r| r.map{|c|"%02x"%[c]}.join(" ")}.join("\n") << "\n"
+    @rows.map { |r| r.map { |c| format("%02x", c) }.join(" ") }.join("\n") << "\n"
   end
 
   def as_tempfile

@@ -2,7 +2,6 @@
 
 # Public: Module with common functionality for the project.
 module Binops
-
   # Public: Parse Ranges from e.g. "0x42", "3", "1..3", "0..-1", "3..0xf".
   #
   # string - String to parse.
@@ -29,6 +28,7 @@ module Binops
     range = parse_range(string)
     raise ArgumentError, "#{string.inspect} is not increasing" unless range.min
     raise ArgumentError, "#{string.inspect} is not positive" if range.min < 0
+
     range
   end
 
@@ -42,13 +42,13 @@ module Binops
   #
   # Returns packed String with the generated pattern
   def self.generate(string)
-      literal_directive, nrepeat = string.split '^'
-      nrepeat = (nrepeat || 1).to_i
-      l, d = literal_directive.split ':'
-      unpacked = l.split(",").map do |s|
-        r = parse_range(s)
-        (r.last < r.first ? r.first.downto(r.last) : r).to_a
-      end
-      ((unpacked.flatten)*nrepeat).pack(d||"C*")
+    literal_directive, nrepeat = string.split '^'
+    nrepeat = (nrepeat || 1).to_i
+    l, d = literal_directive.split ':'
+    unpacked = l.split(",").map do |s|
+      r = parse_range(s)
+      (r.last < r.first ? r.first.downto(r.last) : r).to_a
+    end
+    (unpacked.flatten * nrepeat).pack(d || "C*")
   end
 end

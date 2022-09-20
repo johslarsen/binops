@@ -2,13 +2,12 @@
 
 # Public: Access a view over a preadable_io as an Array-like object.
 class RecordView
-
   # Public: Create a length-sized view at offset into the preadable_io.
   #
   # preadable_io - An IO-like object that supports IO#pread.
   # offset - Start the view at this Integer SEEK_SET offset into the io.
   # length - Integer for what negative indexes will be subtracted from.
-  def initialize(preadable_io, offset, length=nil)
+  def initialize(preadable_io, offset, length = nil)
     @io = preadable_io
     replace(offset, length)
   end
@@ -31,18 +30,19 @@ class RecordView
   # buffer - Pass this String buffer to pread.
   #
   # Returns String from IO#pread.
-  def [](range, buffer=nil)
+  def [](range, buffer = nil)
     to = range.max || range.last # support  a...b (exclusive), and 0..-1 ranges
-    from = range.first < 0 ? @length+range.first : range.first
-    length = (to < 0 ? @length+to : to) - from + 1
+    from = range.first < 0 ? @length + range.first : range.first
+    length = (to < 0 ? @length + to : to) - from + 1
     return "" if length < 0 || @length && from >= @length
+
     length = @length - from if @length && from + length > @length
-    return @io.pread length, @offset + from, buffer
+    @io.pread length, @offset + from, buffer
   end
 
   # Public: A Range associated with how it should be output.
   class UnpackedRange < Struct.new(:range, :directive, :format)
-    def initialize(range, directive="C*", format=" %02x")
+    def initialize(range, directive = "C*", format = " %02x")
       super
     end
   end
@@ -60,10 +60,12 @@ class RecordView
         io.write op
       when Range
         break unless (bytes = self[op])
+
         io.write bytes
       when UnpackedRange
         break unless (bytes = self[op.range])
-        io.write bytes.unpack(op.directive).map{|s| op.format % [s]}.join
+
+        io.write bytes.unpack(op.directive).map { |s| format(op.format, s) }.join
       end
     end
   end
@@ -79,16 +81,16 @@ class RecordView
 
     o.separator "Output operations (executed in order specified)"
     o.on "-f", '--fields N,"N..M",...', Array,
-        "Copy bytes at indexes / in ranges to output" do |fields|
-      args[1].concat(fields.map{|f|Binops.parse_range(f)})
+         "Copy bytes at indexes / in ranges to output" do |fields|
+      args[1].concat(fields.map { |f| Binops.parse_range(f) })
     end
     o.on "-u", '--unpack N,"N..M",...[:DIRECTIVE-=C*][?FORMAT= %02x]',
-        "Write unpacked ranges of bytes to the output",
-        "See `ri String.unpack` for how to specify DIRECTIVE" do |fields_directive_format|
+         "Write unpacked ranges of bytes to the output",
+         "See `ri String.unpack` for how to specify DIRECTIVE" do |fields_directive_format|
       fields_directive, format = fields_directive_format.split("?")
       fields, d = fields_directive.split ':'
       args[1].concat(fields.split(',').map do |f|
-        UnpackedRange.new(Binops.parse_range(f), d||"C*", format||" %02x")
+        UnpackedRange.new(Binops.parse_range(f), d || "C*", format || " %02x")
       end)
     end
 
@@ -96,8 +98,8 @@ class RecordView
       args[1] << s
     end
     o.on "-p", "--pack #{Binops::GENERATE_SYNTAX}",
-        "Append a generated binary pattern to the output",
-        "See `ri Array.pack` for how to specify DIRECTIVE" do |pattern|
+         "Append a generated binary pattern to the output",
+         "See `ri Array.pack` for how to specify DIRECTIVE" do |pattern|
       args[1] << Binops.generate(pattern)
     end
 

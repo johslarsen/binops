@@ -22,11 +22,11 @@ class SeekablePipe
   #
   # Returns a Encoding::ASCII_8BIT String whose length is less than maxlen iff
   # there is no more data available, or nil if the offset is beyond EOF.
-  def pread(maxlen, offset, buffer=nil)
+  def pread(maxlen, offset, buffer = nil)
     buffer ||= @buffer
     buffer = @pipe_buffer ? pipe_read(maxlen, offset, buffer) : @file.pread(maxlen, offset, buffer)
   rescue EOFError
-    return (buffer = nil) # act like read
+    (buffer = nil) # act like read
   rescue Errno::ESPIPE
     @pipe_buffer = String.new encoding: Encoding::ASCII_8BIT
     @pb_offset = 0
@@ -47,12 +47,12 @@ class SeekablePipe
   # Returns fnames.
   # Yields A SeekablePipe wrapping each fname, or $stdin if fnames is empty.
   def self.stdin_or_each(fnames)
-    yield self.new($stdin) if fnames.empty?
+    yield new($stdin) if fnames.empty?
     fnames.each do |fname|
       if fname == '-'
-        yield self.new $stdin
+        yield new $stdin
       else
-        File.open(fname) {|f| yield self.new(f)}
+        File.open(fname) { |f| yield new(f) }
       end
     end
   end
@@ -63,10 +63,10 @@ class SeekablePipe
   #
   # Returns nothing.
   def clear_buffered
-    if @pipe_buffer
-      @pb_offset += @pipe_buffer.size
-      @pipe_buffer.clear
-    end
+    return if @pipe_buffer.nil?
+
+    @pb_offset += @pipe_buffer.size
+    @pipe_buffer.clear
   end
 
   Vlen = Struct.new :range, :directive, :nbytes_extra
@@ -78,10 +78,8 @@ class SeekablePipe
   #
   # Returns self or Enumerator if no block is given.
   # Yields a reused RecordView for each record.
-  def each_record(width, initial_offset:0)
-    unless block_given?
-      return to_enum __method__, width, initial_offset: initial_offset
-    end
+  def each_record(width, initial_offset: 0)
+    return to_enum __method__, width, initial_offset: initial_offset unless block_given?
 
     offset = initial_offset
     record = RecordView.new self, 0
@@ -91,19 +89,21 @@ class SeekablePipe
       length = width
       if length.is_a? Vlen
         break self unless (bytes = pread(width.range.size, offset + width.range.first))
-        length = bytes.unpack(width.directive).first + (width.nbytes_extra || 0)
+
+        length = bytes.unpack1(width.directive) + (width.nbytes_extra || 0)
       end
 
       record.replace offset, length
       yield record
 
       break self if eof?
+
       offset += length
     end
   end
 
   class Filter < Struct.new :range, :comparator, :other, :mask, :directive
-    def initialize range, comparator, other, mask=nil, directive="C"
+    def initialize(range, comparator, other, mask = nil, directive = "C")
       super
     end
   end
@@ -117,23 +117,26 @@ class SeekablePipe
   #
   # Returns self or Enumerator if no block is given.
   # Yields a reused RecordView for each record.
-  def each_record_filtered(width, initial_offset:0, filters: [], count:nil)
+  def each_record_filtered(width, initial_offset: 0, filters: [], count: nil)
     unless block_given?
       return to_enum(__method__, width, initial_offset: initial_offset,
-                     filters: filters, count: count)
+                                        filters: filters, count: count)
     end
 
     each_record(width, initial_offset: initial_offset) do |record|
-      unless filters.empty?
-        next unless filters.any? do |f|
-          break false unless (bytes = record[f.range])
-          n = bytes.unpack(f.directive).first
-          n &= f.mask if f.mask
-          n.send f.comparator, f.other
-        end
+      if !filters.empty? && filters.none? do |f|
+           break false unless (bytes = record[f.range])
+
+           n = bytes.unpack1(f.directive)
+           n &= f.mask if f.mask
+           n.send f.comparator, f.other
+         end
+        next
       end
+
       if count
         break if count <= 0
+
         count -= 1
       end
       yield record
@@ -147,18 +150,19 @@ class SeekablePipe
   # Returns Array meant as SeekablePipe#each_record arguments.
   def self.each_record_filtered_options(option_parser)
     args = [16]
-    kwargs = {initial_offset: 0, count: nil, filters: []}
+    kwargs = { initial_offset: 0, count: nil, filters: [] }
     o = option_parser
 
     non_negative = Struct.new :n
     o.accept non_negative do |str|
       raise "Cannot be negative: #{str.inspect}" if (n = Integer(str)) < 0
+
       n
     end
     o.accept Filter do |range_op_n|
-      range_dir_mask,op,n = range_op_n.partition(/\s*([<>]=?|[!=]=)\s*/)
-      range_dir,m = range_dir_mask.split("&")
-      r,d = range_dir.split(":")
+      range_dir_mask, op, n = range_op_n.partition(/\s*([<>]=?|[!=]=)\s*/)
+      range_dir, m = range_dir_mask.split("&")
+      r, d = range_dir.split(":")
       Filter.new Binops.parse_range(r), op.strip.to_sym, Integer(n), m && Integer(m, 16), d || "C"
     end
 
@@ -191,10 +195,12 @@ class SeekablePipe
 
     [args, kwargs]
   end
+
   private
 
   def pipe_read(maxlen, offset, buffer)
     raise "Cannot seek earlier than start of pipe buffer" if offset < @pb_offset
+
     from = offset - @pb_offset
     to = from + maxlen
     nread = to - @pipe_buffer.size
@@ -202,6 +208,7 @@ class SeekablePipe
       unless @file.read nread, buffer
         return from == @pipe_buffer.size ? nil : @pipe_buffer[from..-1]
       end
+
       @pipe_buffer << buffer
       nread -= buffer.size
     end

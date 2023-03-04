@@ -7,6 +7,7 @@ transformation operations on binary data files/pipes.
 
 | Name             | Description |
 | ---------------- | ----------- |
+| `bvisualize`     | An interactive hexdump GUI where the color of a pixel indicates the byte value.
 | `bstride`        | Output date relative to fixed/variable length records.
 | `hex2bin`        | Given hex data like `10 0-f f*a`, write it as binary data.
 | `uniq_cols.gawk` | Linewise field counter (e.g. `1 2 2 2 1` -> `1 2*3 1`).

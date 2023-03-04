@@ -1,0 +1,140 @@
+#!/usr/bin/python3
+import colorsys
+import os
+import struct
+import sys
+import wx
+
+
+class BVisualize(wx.Panel):
+    def __init__(self, parent, filename):
+        self.parent = parent
+        self.filename = filename
+        self.file = open(filename, "rb")
+        self.offset = int(os.getenv("OFFSET", "0"))
+        self.update_window(int(os.getenv("WIDTH", "1024")), int(os.getenv("HEIGHT", "1024")))
+        self.nbyte_unpack = int(os.getenv("NBYTE_UNPACK", "16"))
+        self.endian = os.getenv("ENDIAN", ">")
+        self.zoom = 1
+
+        wx.Panel.__init__(self, parent, size=(self.width, self.height))
+        self.Bind(wx.EVT_PAINT, self.OnPaint, self)
+        self.Bind(wx.EVT_KEY_DOWN, self.OnKeyDown, self)
+
+    def OnPaint(self, event):
+        img = self.as_bitmap()
+        img.SetScaleFactor(1.0/self.zoom)
+
+        dc = wx.BufferedPaintDC(self)
+        dc.Clear()
+        dc.DrawBitmap(img, 0, 0)
+
+    def OnKeyDown(self, event):
+        key = chr(event.GetRawKeyCode())
+        downcased = key.lower()
+        if downcased == 'q':
+            self.update_window(self.width - (1 if key.islower() else 16), self.height)
+        elif downcased == 'e':
+            self.update_window(self.width + (1 if key.islower() else 16), self.height)
+        elif downcased == 'z':
+            self.update_window(self.width, self.height + 16 * (-1 if key.islower() else 1))
+        elif downcased == 'w':
+            self.offset -= self.width * (1 if key.islower() else 16)
+        elif downcased == 'a':
+            self.offset -= 1 if key.islower() else 16
+        elif downcased == 's':
+            self.offset += self.width * (1 if key.islower() else 16)
+        elif downcased == 'd':
+            self.offset += 1 if key.islower() else 16
+        elif key == '+':
+            self.zoom *= 2
+        elif key == '-':
+            self.zoom = int(self.zoom / 2)
+        else:
+            if downcased == "x":
+                self.print_unpacked("B", "%02x")
+            elif key == "c":
+                self.file.seek(self.offset, os.SEEK_SET)
+                print(f'{self.file.read(self.nbyte_unpack)}')
+            elif downcased == "b":
+                self.print_unpacked(key, "%4d")
+            elif downcased == "h":
+                self.print_unpacked(key, "%6d")
+            elif downcased == "i":
+                self.print_unpacked(key, "%11d")
+            elif downcased == "l":
+                self.print_unpacked("q" if key.islower() else "Q", "%17d")
+            elif downcased == "f":
+                self.print_unpacked("f" if key.islower() else "d", "%12g")
+            elif key == "<" or key == ">" or key == "@":
+                self.endian = key
+            return
+
+        if self.offset < 0:
+            self.offset = 0
+        if self.zoom < 1:
+            self.zoom = 1
+        self.Refresh()
+
+    def update_window(self, width, height):
+        self.width = width if width >= 1 else 1
+        self.height = height if height >= 1 else 1
+        self.parent.SetSize(self.width, self.height)
+
+    def print_unpacked(self, fmt, print_fmt):
+        self.file.seek(self.offset, os.SEEK_SET)
+        bstr = self.file.read(self.nbyte_unpack)
+
+        size = struct.calcsize(fmt)
+        nunpack = len(bstr) // size
+
+        numbers = struct.unpack(f'{self.endian}{nunpack * fmt}', bstr)
+        print(" ".join(print_fmt % n for n in numbers))
+
+    def color(byte):
+        if byte == 0:
+            return (0, 0, 0)
+        if byte == 1:
+            return (0x80, 0x80, 0x80)
+        if byte == 0xff:
+            return (0xff, 0xff, 0xff)
+        (r, g, b) = colorsys.hsv_to_rgb(byte/256.0, 1, 1)
+        return (int(r*255), int(g*255), int(b*255))
+
+    def as_bitmap(self):
+        print(
+            f'dd skip={self.offset} obs={self.width} ibs=1 if={self.filename} | od -Ax -tx1 -w{self.width} | less -S')
+        self.file.seek(self.offset, os.SEEK_SET)
+        raw = self.file.read(self.width*self.height)
+        buffer = bytearray(self.width*self.height*3)
+        for i in range(len(raw)):
+            p = i*3
+            buffer[p+0], buffer[p+1], buffer[p+2] = BVisualize.color(raw[i])
+        return wx.Bitmap.FromBuffer(self.width, self.height, buffer)
+
+
+if __name__ == '__main__':
+    if len(sys.argv) != 2:
+        print(f"USAGE: {sys.argv[0]} FILE")
+        print("""Environment:
+   OFFSET=0        # initial byte offset in file
+   WIDTH=1024      # initial bytes per row
+   HEIGHT=1024     # rows in window
+   NBYTE_UNPACK=16 # number of bytes from offset to print with x/i/...
+   ENDIAN=>        # </>/@ for little/big/native endian to use when reading ints...""")
+        sys.exit(1)
+    filename = sys.argv[1]
+
+    print("Controls: w/a/s/d = move 1px up/left/right/down (upper-case 16px)\n"
+          "          q/e     = 1px decrease/increase width (upper-case 16px)\n"
+          "          z/Z     = 16px decrease/increase height\n"
+          "          +/-     = increase/decrease zoom (value is number of pixels per byte)\n"
+          "          x/c     = print bytes in hex / as a string\n"
+          "          b/h/i/l = print bytes as signed byte/short/int/long (upper-case unsigned)\n"
+          "          f       = print bytes as float (upper-case double)\n"
+          "          </>/@   = change endian when printing ints/...\n")
+    app = wx.App()
+    frame = wx.Frame(parent=None, title=f'binviewer - {filename}')
+    BVisualize(frame, filename)
+    frame.Show()
+    app.MainLoop()

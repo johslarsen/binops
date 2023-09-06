@@ -1,0 +1,5 @@
+#!/bin/bash -
+offset=$1
+insert=${2:?USAGE: cat ORIGINAL_FILE | $0 OFFSET INSERTED_FILE > NEW_FILE}
+
+dd bs="$offset" count=1 2>/dev/null && cat "$insert" /dev/stdin

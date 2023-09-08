@@ -57,14 +57,15 @@ class VFile
     end
     return nil if length.nil? || length.empty?
 
-    (length.start_with?("@") ? Integer(length[1..-1]) - @offset.read(:off_t) : Integer(length)).clamp(0, nil)
+    length = (length.start_with?("@") ? Integer(length[1..-1]) - @offset.read(:off_t) : Integer(length))
+    length < 0 ? 0 : length
   end
 end
 
 def bfmt(format, args)
   autoidx = 0
   files = [VFile.new($stdin), *args.map { |path| VFile.new(File.open(path, "rb")) }]
-  format.split(/(\{[^}]*\})/) do |token|
+  format.split(/(\{[^}]*\})/).each do |token|
     if token =~ /^\{([^}]*)\}$/
       idx, o, l = Regexp.last_match(1).split(":")
       file = files.fetch(idx.nil? || idx.empty? ? (autoidx += 1) : Integer(idx))

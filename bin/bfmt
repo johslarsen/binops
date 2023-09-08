@@ -1,0 +1,113 @@
+#!/usr/bin/env ruby
+require 'ffi'
+
+module GLibc
+  extend FFI::Library
+  ffi_lib('c')
+  attach_function(:splice, %i[int pointer int pointer size_t uint], :ssize_t)
+end
+
+def splice_out(vfile, length = nil, out = $stdout)
+  total = 0
+  while length.nil? || total < length
+    bytes_written = GLibc.splice(vfile.fileno, vfile.offset, out.fileno, FFI::Pointer::NULL, length.nil? ? -1 : length - total, 0)
+    raise SystemCallError, FFI.errno if bytes_written == -1
+    break if bytes_written == 0
+
+    vfile.advance(bytes_written) if vfile.offset == FFI::Pointer::NULL
+    total += bytes_written
+  end
+end
+
+# Track file offsets in the same manner for files and pipes
+class VFile
+  @@devnull = File.open(File::NULL, "w")
+
+  def initialize(io)
+    @io = io
+    @is_pipe = io.stat.pipe?
+    @offset = FFI::MemoryPointer.new(:off_t)
+  end
+
+  def fileno
+    @io.fileno
+  end
+
+  def offset
+    @is_pipe ? FFI::Pointer::NULL : @offset
+  end
+
+  def seek(offset)
+    if @is_pipe
+      drop = offset - @offset.read(:off_t)
+      raise "Cannot seek backwards in pipe: #{@io}" if drop < 0
+
+      splice_out(self, drop, @@devnull)
+    end # else seek is implicit in the updated offset
+    @offset.write(:off_t, offset)
+  end
+
+  def advance(length)
+    @offset.write(:off_t, @offset.read(:off_t) + length)
+  end
+
+  def seek_to_offset_and_return_length(offset, length)
+    unless offset.nil? || offset.empty?
+      seek(offset.start_with?("@") ? Integer(offset[1..-1]) : @offset.read(:off_t) + Integer(offset))
+    end
+    return nil if length.nil? || length.empty?
+
+    (length.start_with?("@") ? Integer(length[1..-1]) - @offset.read(:off_t) : Integer(length)).clamp(0, nil)
+  end
+end
+
+def bfmt(format, args)
+  autoidx = 0
+  files = [VFile.new($stdin), *args.map { |path| VFile.new(File.open(path, "rb")) }]
+  format.split(/(\{[^}]*\})/) do |token|
+    if token =~ /^\{([^}]*)\}$/
+      idx, o, l = Regexp.last_match(1).split(":")
+      file = files.fetch(idx.nil? || idx.empty? ? (autoidx += 1) : Integer(idx))
+      length = file.seek_to_offset_and_return_length(o, l)
+      splice_out(file, length)
+    else
+      $stdout.write(token)
+    end
+  end
+end
+
+if $PROGRAM_NAME == __FILE__
+  require 'optparse'
+
+  args = OptionParser.new do |o|
+    o.banner += <<EOF
+ FORMAT [FILE]... > OUTPUT
+
+Prints FILE(s) according to the FORMAT.
+
+FORMAT is a C++ format string with replacement field that supports a
+format-spec like the shell substring expansion:
+
+    {[arg-id][:offset][:length]}
+
+Where arg-id refers to the nth-file argument, 0 for stdin or empty to use the
+next argument. The optional offset skips ahead this many bytes in the file or
+seeks to the position if prefixed with @. The optional length limits the read
+to this many bytes or to the given position if prefixed with @. Parts of the
+format string that are not replacement fields are written directly.
+
+EXAMPLES:
+    echo -n bar | bfmt "FOO{0}BAZ" => "FOObarBAZ"
+    bfmt "{}{}" <(echo -n foo) <(echo -n bar) => "foobar"
+    bfmt "{1:0:2} {1:2}" <(echo -n foobar) => "fo ar"
+    bfmt "{1:0:2} {1:@3:@5}" <(echo -n foobar) => "fo ba"
+EOF
+  end.permute!
+  raise "Missing FORMAT argument" if args.empty?
+
+  Signal.trap("SIGPIPE", "SYSTEM_DEFAULT")
+  $stdout.sync = true
+  raise "Stdout cannot be a TTY" if $stdout.tty?
+
+  bfmt(args[0], args[1..-1])
+end

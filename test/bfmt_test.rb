@@ -15,4 +15,8 @@ class BfmtTest < Minitest::Test
       assert_equal("fo ba", pipe("#{BIN}/bfmt", "{1:0:2} {1:@3:@5}", "#{tmp}/foobar"))
     end
   end
+
+  def test_dev_zero
+    assert_equal("\0" * 15, pipe("#{BIN}/bfmt", "{::10}{1:10:5}", "/dev/zero"))
+  end
 end

@@ -14,9 +14,9 @@ def splice_out(vfile, length = nil, out = $stdout)
     raise SystemCallError, FFI.errno if bytes_written == -1
     break if bytes_written == 0
 
-    vfile.advance(bytes_written) if vfile.offset == FFI::Pointer::NULL
     total += bytes_written
   end
+  total
 end
 
 # Track file offsets in the same manner for files and pipes
@@ -26,6 +26,7 @@ class VFile
   def initialize(io)
     @io = io
     @is_pipe = io.stat.pipe?
+    @supports_splice = true # until proven otherwise
     @offset = FFI::MemoryPointer.new(:off_t)
   end
 
@@ -38,11 +39,11 @@ class VFile
   end
 
   def seek(offset)
-    if @is_pipe
+    if @is_pipe || !@supports_splice
       drop = offset - @offset.read(:off_t)
       raise "Cannot seek backwards in pipe: #{@io}" if drop < 0
 
-      splice_out(self, drop, @@devnull)
+      splice_to(drop, @@devnull)
     end # else seek is implicit in the updated offset
     @offset.write(:off_t, offset)
   end
@@ -60,6 +61,18 @@ class VFile
     length = (length.start_with?("@") ? Integer(length[1..-1]) - @offset.read(:off_t) : Integer(length))
     length < 0 ? 0 : length
   end
+
+  def splice_to(length, io)
+    if @supports_splice
+      written = splice_out(self, length, io)
+      advance(written) if @is_pipe # otherwise splice updated offset
+    else
+      advance(IO.copy_stream(@io, io, length))
+    end
+  rescue Errno::EINVAL
+    @supports_splice = false
+    retry
+  end
 end
 
 def bfmt(format, args)
@@ -70,7 +83,7 @@ def bfmt(format, args)
       idx, o, l = Regexp.last_match(1).split(":")
       file = files.fetch(idx.nil? || idx.empty? ? (autoidx += 1) : Integer(idx))
       length = file.seek_to_offset_and_return_length(o, l)
-      splice_out(file, length)
+      file.splice_to(length, $stdout)
     else
       $stdout.write(token)
     end

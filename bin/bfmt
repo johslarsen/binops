@@ -7,10 +7,10 @@ module GLibc
   attach_function(:splice, %i[int pointer int pointer size_t uint], :ssize_t)
 end
 
-def splice_out(vfile, length = nil, out = $stdout)
+def splice(input, length = nil, output = $stdout)
   total = 0
   while length.nil? || total < length
-    bytes_written = GLibc.splice(vfile.fileno, vfile.offset, out.fileno, FFI::Pointer::NULL, length.nil? ? -1 : length - total, 0)
+    bytes_written = GLibc.splice(input.fileno, FFI::Pointer::NULL, output.fileno, FFI::Pointer::NULL, length.nil? ? -1 : length - total, 0)
     raise SystemCallError, FFI.errno if bytes_written == -1
     break if bytes_written == 0
 
@@ -19,71 +19,66 @@ def splice_out(vfile, length = nil, out = $stdout)
   total
 end
 
-# Track file offsets in the same manner for files and pipes
-class VFile
-  @@devnull = File.open(File::NULL, "w")
-
+class OFile
   def initialize(io)
     @io = io
-    @is_pipe = io.stat.pipe?
-    @supports_splice = true # until proven otherwise
-    @offset = FFI::MemoryPointer.new(:off_t)
-  end
-
-  def fileno
-    @io.fileno
-  end
-
-  def offset
-    @is_pipe ? FFI::Pointer::NULL : @offset
+    @seekable = !io.stat.pipe?
+    @spliceable = true # until proven otherwise
+    @offset = 0
   end
 
   def seek(offset)
-    if @is_pipe || !@supports_splice
-      drop = offset - @offset.read(:off_t)
+    return if offset.nil?
+
+    if @seekable
+      @io.seek(offset)
+      @offset = offset
+    else
+      drop = offset - @offset
       raise "Cannot seek backwards in pipe: #{@io}" if drop < 0
 
-      splice_to(drop, @@devnull)
-    end # else seek is implicit in the updated offset
-    @offset.write(:off_t, offset)
-  end
-
-  def advance(length)
-    @offset.write(:off_t, @offset.read(:off_t) + length)
-  end
-
-  def seek_to_offset_and_return_length(offset, length)
-    unless offset.nil? || offset.empty?
-      seek(offset.start_with?("@") ? Integer(offset[1..-1]) : @offset.read(:off_t) + Integer(offset))
+      @@devnull ||= File.open(File::NULL, "w")
+      copy_to(@@devnull, drop)
     end
+  rescue Errno::ESPIPE
+    @seekable = false
+    retry
+  end
+
+  def parse_offset(relative)
+    return nil if relative.nil? || relative.empty?
+
+    relative.start_with?("@") ? Integer(relative[1..-1]) : @offset + Integer(relative)
+  end
+
+  def parse_length(length)
     return nil if length.nil? || length.empty?
 
-    length = (length.start_with?("@") ? Integer(length[1..-1]) - @offset.read(:off_t) : Integer(length))
+    length = (length.start_with?("@") ? Integer(length[1..-1]) - @offset : Integer(length))
     length < 0 ? 0 : length
   end
 
-  def splice_to(length, io)
-    if @supports_splice
-      written = splice_out(self, length, io)
-      advance(written) if @is_pipe # otherwise splice updated offset
-    else
-      advance(IO.copy_stream(@io, io, length))
-    end
+  def copy_to(io, length)
+    @offset += if @spliceable
+                 splice(@io, length, io)
+               else
+                 IO.copy_stream(@io, io, length)
+               end
   rescue Errno::EINVAL
-    @supports_splice = false
+    @spliceable = false
     retry
   end
 end
 
 def bfmt(format, args)
   autoidx = 0
-  files = [VFile.new($stdin), *args.map { |path| VFile.new(File.open(path, "rb")) }]
+  files = [OFile.new($stdin), *args.map { |path| OFile.new(File.open(path, "rb")) }]
   format.split(/(\{[^}]*\})/).each do |token|
     if token =~ /^\{([^}]*)\}$/
-      idx, o, l = Regexp.last_match(1).split(":")
+      idx, offset, length = Regexp.last_match(1).split(":")
       file = files.fetch(idx.nil? || idx.empty? ? (autoidx += 1) : Integer(idx))
-      length = file.seek_to_offset_and_return_length(o, l)
-      file.splice_to(length, $stdout)
+      file.seek(file.parse_offset(offset))
+      file.copy_to($stdout, file.parse_length(length))
     else
       $stdout.write(token)
     end

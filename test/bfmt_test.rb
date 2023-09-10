@@ -19,4 +19,17 @@ class BfmtTest < Minitest::Test
   def test_dev_zero
     assert_equal("\0" * 15, pipe("#{BIN}/bfmt", "{::10}{1:10:5}", "/dev/zero"))
   end
+
+  def test_pipes
+    assert_equal("bar", pipe("#{BIN}/bfmt", "{0:3}", stdin: "foobar"))
+  end
+
+  def test_fallback
+    # splice requires at least one of the file descriptors to be a pipe
+    Dir.mktmpdir do |tmp|
+      File.write("#{tmp}/foobar", "foobar")
+      assert(system("#{BIN}/bfmt", "{:3}", "#{tmp}/foobar", out: "#{tmp}/output"))
+      assert_equal("bar", File.read("#{tmp}/output"))
+    end
+  end
 end

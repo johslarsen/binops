@@ -1,0 +1,10 @@
+#!/usr/bin/env ruby
+require 'open3'
+Signal.trap("SIGPIPE", "SYSTEM_DEFAULT")
+base = Integer(ENV.fetch("BASE", 16))
+Open3.pipeline_w(["xxd", "-r", *ARGV]) do |stdin,|
+  $stdin.each_line do |line|
+    idx, rest = line.split(nil, 2)
+    stdin.puts(format("%08x: %s", Integer(idx.gsub(/:/, ""), base), rest))
+  end
+end

@@ -160,10 +160,17 @@ class SeekablePipe
       n
     end
     o.accept Filter do |range_op_n|
-      range_dir_mask, op, n = range_op_n.partition(/\s*([<>]=?|[!=]=)\s*/)
-      range_dir, m = range_dir_mask.split("&")
-      r, d = range_dir.split(":")
-      Filter.new Binops.parse_range(r), op.strip.to_sym, Integer(n), m && Integer(m, 16), d || "C"
+      m = range_op_n.match(/^(?<range>[[:xdigit:]x.-]+)
+                             (?<directive>:[a-zA-Z!<>_]+)?
+                             (?:&(?<mask>\h+))?
+                          \s*(?<op>[<>]=?|[!=]=)
+                          \s*(?<needle>[[:xdigit:]x]+)$/x)
+      raise "Invalid grep pattern: #{range_op_n.inspect}" if m.nil?
+
+      range = Binops.parse_range(m[:range])
+      mask = m[:mask] && Integer(m[:mask], 16)
+      directive = m[:directive] || "C"
+      Filter.new(range, m[:op].to_sym, Integer(m[:needle]), mask, directive)
     end
 
     o.separator "Record processing"

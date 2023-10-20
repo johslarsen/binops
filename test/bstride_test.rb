@@ -68,6 +68,22 @@ EOF
     end
   end
 
+  def test_filter_with_mask
+    IotaMatrix.new(8, 16).as_tempfile do |f|
+      assert_equal <<EOF, `#{BIN}/bstride -f0 -w16 -g "0&10==0x10" #{f.path} | #{BIN}/xd -Anone -w16`
+ 10 30 50 70
+EOF
+    end
+  end
+
+  def test_filter_with_directive
+    IotaMatrix.new(8, 16).as_tempfile do |f|
+      assert_equal <<EOF, `#{BIN}/bstride -f0 -w16 -g "0..1:S> > 0x4041" #{f.path} | #{BIN}/xd -Anone -w16`
+ 50 60 70
+EOF
+    end
+  end
+
   def test_no_input
     assert_equal <<EOF, `#{BIN}/bstride -p 0..7,0xf7..0xf0 -p 0,0xff^8 -c2 | #{BIN}/xd -Anone`
  00 01 02 03 04 05 06 07 f7 f6 f5 f4 f3 f2 f1 f0

@@ -1,0 +1,40 @@
+#!/bin/bash -
+OFFSET=${OFFSET:-0}
+LIMIT=${LIMIT:--1}
+ENDIAN=${ENDIAN:-big}
+PP=${PP:-yes}
+OFMT=${OFMT:-F}
+LFMT=${LFMT="%u32x: "}
+
+type="${1:?USAGE: OFFSET=$OFFSET LIMIT=$LIMIT ENDIAN=$ENDIAN PP=$PP OFMT=$OFMT $0 [PICKLE:]TYPE[.SELECTOR] FILE...}"
+
+[[ "$type" != "${type%:*}" ]] && load="load \"${type%%:*}.pk\";" && type="${type#*:}"
+[[ "$type" != "${type%.*}" ]] && selector=".${type#*.}" && type="${type%%.*}"
+
+script=$(mktemp -t ppoke.XXXXXXXXXX.pk)
+cleanup() {
+    rm -rf "$script"
+}
+trap cleanup INT TERM EXIT
+
+location=","
+[[ "$LFMT" =~ %s ]] && location+=f,
+[[ "$LFMT" =~ %[^s] ]] && location+=offset/#B,
+
+cat > "$script" <<EOF
+$load
+var limit = $LIMIT as uint<64>;
+for (f in argv) {
+    openset(f);
+    var offset = ${OFFSET}L#B;
+    var nth = 0UL;
+    try {
+        var element = $type@offset;
+        printf("$LFMT%${OFMT}v\\n" $location element$selector);
+        offset += element'size;
+        nth += 1;
+        if (nth >= limit) break;
+    } until E_eof;
+}
+EOF
+poke -c ".set pretty-print $PP" -c ".set endian $ENDIAN" -L "$script" "${@:2}"

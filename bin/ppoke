@@ -1,12 +1,13 @@
 #!/bin/bash -
 OFFSET=${OFFSET:-0}
+OFMT=${OFMT:-$([[ "$PP" == "yes" ]] && echo "F" || echo "T")}
+CUTOFF=${CUTOFF:-$([[ "$OFMT" == "dump" ]] && echo 64 || echo 8)}
 LIMIT=${LIMIT:--1}
 ENDIAN=${ENDIAN:-big}
 PP=${PP:-yes}
-OFMT=${OFMT:-F}
 LFMT=${LFMT="%u32x: "}
 
-type="${1:?USAGE: OFFSET=$OFFSET LIMIT=$LIMIT ENDIAN=$ENDIAN PP=$PP OFMT=$OFMT $0 [PICKLE:]TYPE[.SELECTOR] FILE...}"
+type="${1:?USAGE: [OFFSET=$OFFSET] [LIMIT=$LIMIT] [ENDIAN=$ENDIAN] [PP=$PP] [OFMT=$OFMT] [FILTER=$FILTER] $0 [PICKLE:]TYPE[.SELECTOR] FILE...}"
 
 [[ "$type" != "${type%:*}" ]] && load="load \"${type%%:*}.pk\";" && type="${type#*:}"
 [[ "$type" != "${type%.*}" ]] && selector=".${type#*.}" && type="${type%%.*}"
@@ -21,6 +22,13 @@ location=","
 [[ "$LFMT" =~ %s ]] && location+=f,
 [[ "$LFMT" =~ %[^s] ]] && location+=offset/#B,
 
+if [[ "$OFMT" == "dump" ]]; then
+    print="dump :ruler 0 :from element$selector'offset :size (element$selector'size<$CUTOFF#B ? element$selector'size : $((CUTOFF*8))UL#b)"
+else
+    print="printf(\"$LFMT%${OFMT}v\\n\" $location element$selector)"
+fi
+[[ "$FILTER" ]] && filter="!(element.$FILTER)" || filter="1"
+
 cat > "$script" <<EOF
 $load
 var limit = $LIMIT as uint<64>;
@@ -30,11 +38,15 @@ for (f in argv) {
     var nth = 0UL;
     try {
         var element = $type@offset;
-        printf("$LFMT%${OFMT}v\\n" $location element$selector);
+        try {
+            if ($filter) {
+                $print;
+                nth += 1;
+            }
+        } catch if (E_elem) {};
         offset += element'size;
-        nth += 1;
         if (nth >= limit) break;
     } until E_eof;
 }
 EOF
-poke -c ".set pretty-print $PP" -c ".set endian $ENDIAN" -L "$script" "${@:2}"
+poke -c ".set pretty-print $PP" -c ".set endian $ENDIAN" -c ".set oacutoff $CUTOFF" -L "$script" "${@:2}"

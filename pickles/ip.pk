@@ -1,0 +1,165 @@
+type TCPControl = struct {
+  bit cwr;
+  bit ece;
+  bit urg;
+  bit ack;
+  bit psh;
+  bit rst;
+  bit syn;
+  bit fin;
+
+  method _print = void: {
+    printf("#<%c%c%c%c%c%c%c%c>", cwr?'c':'-', ece?'e':'-', urg?'U':'-', ack?'a':'-', psh?'p':'-', rst?'R':'-', syn?'S':'-', fin?'F':'-');
+  }
+};
+
+// https://www.rfc-editor.org/rfc/rfc768
+type UDP = struct {
+  uint<16> src;
+  uint<16> dest;
+  offset<uint<16>,B> length;
+  uint<16> checksum;
+  byte[length - OFFSET] payload;
+
+  method _print = void: {
+    printf("#<%u16d:%u16d %u16dB>", src, dest, payload'size/#B);
+  }
+};
+
+type IPv4_QOS = struct {
+  uint<3> precedence;
+  bit lowDelay;
+  bit highThroughput;
+  bit highReliability;
+  uint<2> /*==0*/;
+
+  method _print = void: {
+    printf("#<%u3d%c>", precedence, lowDelay ? 'L' : highThroughput ? 'T' : highReliability ? 'R' : '-');
+  }
+};
+type IPv4Fragment = struct {
+  bit /*==0*/;
+  bit dont;
+  bit more;
+  offset<uint<13>,64> off;
+
+  method _print = void: {
+    printf("#<%c%c", dont ? 'D' : '-', more ? 'M' : 'F');
+    if (dont) print(">");
+    else printf("%u32x>", off/#B);
+  }
+};
+type IPv4Addr = struct {
+  byte[4] addr;
+  method _print = void: {
+    printf("#<%u8d.%u8d.%u8d.%u8d>", addr[0], addr[1], addr[2], addr[3]);
+  }
+};
+// https://www.rfc-editor.org/rfc/rfc791#section-3.1
+type IPv4Header = struct {
+  uint<4> version == 4;
+  offset<uint<4>,32> ihl; // Internet Header Length
+  IPv4_QOS qos;
+  offset<uint<16>,B> length;
+  uint<16> id;
+  IPv4Fragment fragment;
+  byte ttl;
+  byte protocol; // https://www.rfc-editor.org/rfc/rfc790#page-6
+  uint<16> checksum;
+  IPv4Addr src;
+  IPv4Addr dest;
+
+  uint<32>[ihl-OFFSET] optionWords;
+};
+
+type IPv4 = struct {
+  IPv4Header ip;
+  union {
+    struct { // https://www.rfc-editor.org/rfc/rfc792#page-4
+      byte class;
+      byte code;
+      uint<16> checksum;
+
+      var payloadSize = ip.length - ip'size - OFFSET;
+      union {
+        struct {
+          uint<16> id;
+          uint<16> seq;
+          byte[payloadSize - OFFSET] payload;
+          method _print = void: {
+            printf("#<%u16d.%u16d>", id, seq);
+          }
+        } echoReply : class == 0;
+        byte[payloadSize] unreachable : class == 3;
+        byte[payloadSize] srcQuenchw : class == 4;
+        byte[payloadSize] redirect : class == 5;
+        struct {
+          uint<16> id;
+          uint<16> seq;
+          byte[payloadSize - OFFSET] payload;
+          method _print = void: {
+            printf("#<%u16d.%u16d>", id, seq);
+          }
+        } echo : class == 8;
+        byte[payloadSize] timeExceeded : class == 11;
+        byte[payloadSize] parameterProblem : class == 12;
+        byte[payloadSize] timestamp : class == 13;
+        byte[payloadSize] timestampReply : class == 14;
+        byte[payloadSize] infoRequest : class == 15;
+        byte[payloadSize] infoReply : class == 16;
+        byte[payloadSize] unknown;
+      } payload;
+
+      method _print = void: {
+        printf("#<%v>", payload);
+      }
+    } icmp : ip.protocol == 1;
+
+    struct { // https://www.ietf.org/rfc/rfc9293.html
+      uint<16> src;
+      uint<16> dest;
+      uint<32> seq;
+      uint<32> ack;
+      offset<uint<4>,32> dataOffset;
+      uint<4>;
+      TCPControl control;
+      uint<16> window;
+      uint<16> checksum;
+      uint<16> urgent;
+      uint<32>[dataOffset-OFFSET] optionWords;
+
+      byte[ip.length - ip'size - OFFSET] payload;
+
+      method _print = void: {
+        printf("#<%u16d:%u16d %v %u16dB>", src, dest, control, payload'size/#B);
+      }
+    } tcp : ip.protocol == 6;
+
+    UDP udp : ip.protocol == 17;
+
+    struct {
+      uint<16> src;
+      uint<16> dest;
+      offset<uint<16>,B> coverage;
+      uint<16> checksum;
+      byte[ip.length -ip'size - OFFSET] payload;
+
+      method _print = void: {
+        printf("#<%u16d:%u16d %u16dB>", src, dest, payload'size/#B);
+      }
+    } udpLite : ip.protocol == 136;
+
+    byte[ip.length - ip'size] raw;
+  } payload;
+
+  byte[ip.length - OFFSET]; // gobble up leftover bytes after protocol parsing
+
+  method _print = void: {
+    printf("#<%v:%v %v ", ip.src, ip.dest, ip.qos);
+    if (ip.protocol == 1) printf("ICMP%v>", payload.icmp);
+    else if (ip.protocol == 6) printf("TCP%v>", payload.tcp);
+    else if (ip.protocol == 17) printf("UDP%v>", payload.udp);
+    else if (ip.protocol == 136) printf("UDPl%v>", payload.udpLite);
+    else printf("%u8d %u16dB>", ip.protocol, payload.raw'size/#B);
+  }
+};

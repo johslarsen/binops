@@ -1,0 +1,77 @@
+load ip;
+
+type MACAddr = struct {
+  byte[6] addr;
+  method _print = void: {
+    printf("#<%u8x:%u8x:%u8x:%u8x:%u8x:%u8x>", addr[0], addr[1], addr[2], addr[3], addr[4], addr[5]);
+  }
+};
+
+// https://en.wikipedia.org/wiki/Wake-on-LAN#Magic_packet
+type WOL = struct {
+  uint<48> magic /*== 0xffffffffffff*/;
+  MACAddr[16] target; // copies of the same
+  method _print = void: {
+    printf("#<%v>", target[0]);
+  }
+};
+
+// https://en.wikipedia.org/wiki/Address_Resolution_Protocol#Packet_structure
+type ARP = struct {
+  uint<16> htype /* == 1*/; // for Ethernet
+  uint<16> ptype; // aka. EtherType
+  offset<byte,B> hlen /* == 6*/; // for MACAddr
+  offset<byte,B> plen;
+  uint<16> oper; // 1: request, 2: reply
+  uint<16>[hlen] sha; // aka. Sender Hardware Address
+  uint<16>[plen] spa; // aka. Sender Protocol Address
+  uint<16>[hlen] tha; // aka. Target Hardware Address
+  uint<16>[plen] tpa; // aka. target Protocol Address
+  method _print = void: {
+    printf("#<%u16x.%u16x %s", htype, ptype, oper == 1 ? "request" : oper == 2 ? "reply" : "unknown");
+    if (htype == 1) printf(" %v:%v", MACAddr@sha'offset, MACAddr@tha'offset);
+    else printf(" %v:%v", sha, tha);
+    if (ptype == 0x0800) printf(" %v:%v>", IPv4Addr@spa'offset, IPv4Addr@tpa'offset);
+    else printf(" %v:%v>", spa, tpa);
+  }
+};
+
+// https://en.wikipedia.org/wiki/IEEE_802.1Q#Frame_format
+type VLanTag = struct {
+  uint<16> tpid; // Tag protocol identifier
+  uint<3> pcp; // Priority code point
+  bit dei; // Drop eligible indicator
+  uint<12> vid; // VLAN identifier
+  method _print = void: {
+    printf("#<%u12d CS%u3d%c>", vid, pcp, dei ? 'D' : '-');
+  }
+};
+// https://en.wikipedia.org/wiki/IEEE_802.1Q#Frame_format
+type EthHeader = struct {
+  MACAddr dest;
+  MACAddr src;
+  VLanTag tag if tag.tpid == 0x8100;
+  uint<16> etherType; // https://en.wikipedia.org/wiki/EtherType#Values
+  method _print = void: {
+    printf("#<%v:%v ", dest, src);
+    {printf("%v ", tag);} ?! E_elem;
+    printf("%u16x>", etherType);
+  }
+};
+
+// https://en.wikipedia.org/wiki/Ethernet_frame#Structure
+// but meant to decode e.g. tcpdump packet listing prefixed with the MAC
+// header, instead of the MAC frames (i.e. MTU-sized payloads) themselves.
+type Eth = struct {
+  EthHeader eth;
+  union {
+    byte[eth.etherType] ieee802_3 : eth.etherType < 1500; // where this is a length field
+    IPv4 ipv4                     : eth.etherType == 0x0800;
+    ARP arp                       : eth.etherType == 0x0806;
+    WOL wol                       : eth.etherType == 0x0842;
+    struct {} unknown;
+  } payload;
+  method _print = void: {
+    printf("#<%v %v>", eth, payload);
+  }
+};

@@ -1,0 +1,7 @@
+fun optenv = (string name, string default) string: {
+  try {
+    return getenv(name);
+  } catch {
+    return default;
+  }
+}

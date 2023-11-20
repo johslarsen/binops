@@ -1,0 +1,18 @@
+#!/usr/bin/env ruby
+require 'open3'
+require 'shellwords'
+EXE = ARGV.shift
+Open3.popen2("addr2line", "-Cfse#{EXE}") do |stdin, stdout|
+  ARGF.each_line do |line|
+    line.chomp!
+    if line =~ /^(.*@ )( *)(0x\h+)(.*)/
+      prefix, _, addr, rest = Regexp.last_match[1..-1]
+      stdin.puts(addr)
+      function = stdout.gets.chomp
+      location = stdout.gets.chomp
+      puts "#{prefix}#{location} #{function} #{addr} #{rest.chomp('  (unknown)')}"
+    else
+      puts line
+    end
+  end
+end

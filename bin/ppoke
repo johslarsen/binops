@@ -7,9 +7,25 @@ ENDIAN=${ENDIAN:-big}
 PP=${PP:-yes}
 LFMT=${LFMT="%u32x: "}
 
-type="${1:?USAGE: [OFFSET=$OFFSET] [LIMIT=$LIMIT] [ENDIAN=$ENDIAN] [PP=$PP] [OFMT=$OFMT] [FILTER=$FILTER] $0 [PICKLE:]TYPE[.SELECTOR] FILE...}"
+type="${1:?USAGE: [OFFSET=$OFFSET] [LIMIT=$LIMIT] [ENDIAN=$ENDIAN] [PP=$PP] [OFMT=$OFMT] [FILTER=$FILTER] $0 [PICKLE:]TYPE [.SELECTOR]... [--] FILE...}"
 
 [[ "$type" != "${type%:*}" ]] && load="load \"${type%%:*}.pk\";" && type="${type#*:}"
+
+args=( "${@:2}" )
+selector=( "" )
+for ((i=0; i<${#args[@]}; ++i)); do
+    arg="${args[$i]}"
+    if [[ "$arg" == "--" ]]; then
+        selector=( "${args[@]:0:$((i))}" )
+        args=( "${args[@]:$((i+1))}" )
+        break
+    elif [[ "${arg:0:1}" != "." ]]; then
+        selector=( "${args[@]:0:$((i))}" )
+        args=( "${args[@]:$i}" )
+        break
+    fi
+done
+
 [[ "$type" != "${type%.*}" ]] && selector=".${type#*.}" && type="${type%%.*}"
 
 script=$(mktemp -t ppoke.XXXXXXXXXX.pk)
@@ -21,12 +37,13 @@ trap cleanup INT TERM EXIT
 location=","
 [[ "$LFMT" =~ %s ]] && location+=f,
 [[ "$LFMT" =~ %[^s] ]] && location+=offset/#B,
-
-if [[ "$OFMT" == "dump" ]]; then
-    print="dump :ruler 0 :from element$selector'offset :size (element$selector'size<$CUTOFF#B ? element$selector'size : $((CUTOFF*8))UL#b)"
-else
-    print="printf(\"$LFMT%${OFMT}v\\n\" $location element$selector)"
-fi
+for ((i=0; i<${#selector[@]}; ++i)); do
+    if [[ "$OFMT" == "dump" ]]; then
+        print+="dump :ruler 0 :from element$selector'offset :size (element$selector'size<$CUTOFF#B ? element${selector[$i]}'size : $((CUTOFF*8))UL#b);"
+    else
+        print+="printf(\"$LFMT%${OFMT}v\\n\" $location element${selector[$i]});"
+    fi
+done
 [[ "$FILTER" ]] && filter="!(element.$FILTER)" || filter="1"
 
 cat > "$script" <<EOF
@@ -40,7 +57,7 @@ for (f in argv) {
         var element = $type@offset;
         try {
             if ($filter) {
-                $print;
+                $print
                 nth += 1;
             }
         } catch if (E_elem) {};
@@ -49,4 +66,4 @@ for (f in argv) {
     } until E_eof;
 }
 EOF
-poke -c ".set pretty-print $PP" -c ".set endian $ENDIAN" -c ".set oacutoff $CUTOFF" -L "$script" "${@:2}"
+poke -c ".set pretty-print $PP" -c ".set endian $ENDIAN" -c ".set oacutoff $CUTOFF" -L "$script" "${args[@]}"
